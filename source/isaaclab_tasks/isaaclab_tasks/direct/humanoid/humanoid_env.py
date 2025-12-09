@@ -21,11 +21,11 @@ from isaaclab_tasks.direct.locomotion.locomotion_env import LocomotionEnv
 @configclass
 class HumanoidEnvCfg(DirectRLEnvCfg):
     # env
-    episode_length_s = 15.0
+    episode_length_s = 10.0
     decimation = 2
     action_scale = 1.0
     action_space = 21
-    observation_space = 75
+    observation_space = 93
     state_space = 0
 
     # simulation
@@ -46,7 +46,7 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=4096, env_spacing=4.0, replicate_physics=True, clone_in_fabric=True
+        num_envs=128, env_spacing=4.0, replicate_physics=True, clone_in_fabric=True
     )
 
     # robot

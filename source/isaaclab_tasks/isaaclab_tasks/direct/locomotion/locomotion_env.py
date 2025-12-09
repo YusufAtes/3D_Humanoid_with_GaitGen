@@ -14,9 +14,9 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 
-from gait_generator_net import SimpleFCNN
+from .gait_generator_net import SimpleFCNN
 import numpy as np
-
+from scipy.signal import resample
 
 def normalize_angle(x):
     return torch.atan2(torch.sin(x), torch.cos(x))
@@ -48,16 +48,23 @@ class LocomotionEnv(DirectRLEnv):
         self.basis_vec0 = self.heading_vec.clone()
         self.basis_vec1 = self.up_vec.clone()
 
-        # --------------------------    Gait Generator System    --------------------------#
+        # # --------------------------    Gait Generator System    --------------------------#
 
         self.gaitgen_net = SimpleFCNN()
-        self.gaitgen_net.load_state_dict(torch.load('final_model.pth',weights_only=True))
-        
-        self.normalizationconst = np.load(rf"newnormalization_constants.npy")
+        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\final_model.pth',weights_only=True))
+        self.gaitgen_net.to(self.sim.device)
+        self.gaitgen_net.eval()
+
+        self.normalizationconst = np.load(rf"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\newnormalization_constants.npy")
         self.leg_len = 0.94
         self.dt = self.physics_dt 
+        self.reference = torch.empty(
+            (self.num_envs, 3840, 6),
+            device=self.sim.device,
+            dtype=torch.float32,
+        )
 
-        # --------------------------    Gait Generator System    --------------------------#
+        # # --------------------------    Gait Generator System    --------------------------#
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -121,14 +128,6 @@ class LocomotionEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
 
-        # --------------------------    Gait Generator System    --------------------------#
-
-        current_t = int(self.progress_buf*2)
-
-
-
-        # --------------------------    Gait Generator System    --------------------------#
-
         obs = torch.cat(
             (
                 self.torso_position[:, 2].view(-1, 1),
@@ -141,10 +140,34 @@ class LocomotionEnv(DirectRLEnv):
                 self.heading_proj.unsqueeze(-1),
                 self.dof_pos_scaled,
                 self.dof_vel * self.cfg.dof_vel_scale,
-                self.actions,
-            ),
+                self.actions            ),
             dim=-1,
         )
+
+        # # --------------------------    Gait Generator System    --------------------------#
+        if self.reference is not None:
+            T = self.reference.shape[1]
+            # physics steps since reset ≈ episode_length * decimation
+            step_idx = self.episode_length_buf * self.cfg.decimation + self.random_start_idx
+            # clamp to leave room for t+10
+            max_idx = T - 11
+            step_idx = torch.clamp(step_idx, 0, max_idx)
+            env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
+            current_ref   = self.reference[env_ids,step_idx,:]
+            future_reft1  = self.reference[env_ids,step_idx + 1,:]
+            future_reft10 = self.reference[env_ids,step_idx + 10,:]
+
+            obs = torch.cat(
+                (
+                    obs,
+                    current_ref,
+                    future_reft1,
+                    future_reft10
+                ),
+                dim=-1
+                )
+        # # --------------------------    Gait Generator System    --------------------------#
+
         observations = {"policy": obs}
         return observations
 
@@ -192,21 +215,22 @@ class LocomotionEnv(DirectRLEnv):
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
-        # --------------------------    Gait Generator System    --------------------------#
-        self.reference_speed = np.random.uniform(0.2,3.0)
-        encoder_vec = np.empty((3))   
+        # # --------------------------    Gait Generator System    --------------------------#
+        for env_id in env_ids:
+            self.reference_speed = np.random.uniform(0.2,3.0)
+            encoder_vec = torch.empty((3),device=self.sim.device)   
 
-        encoder_vec[0] = self.reference_speed/3
-        encoder_vec[1] = self.leg_len /1.5
-        encoder_vec[2] = self.leg_len /1.5
+            encoder_vec[0] = self.reference_speed/3
+            encoder_vec[1] = self.leg_len /1.5
+            encoder_vec[2] = self.leg_len /1.5
 
-        encoder_vec = torch.tensor(encoder_vec, dtype=torch.float32)    
-        self.reference = self.findgait(encoder_vec)                     #Find the gait
-        self.reference = np.clip(self.reference, -np.pi/2, np.pi/2)     #Clip the gait
+            self.reference[env_id,:] = self.findgait(encoder_vec)                     #Find the gait
+            self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
+            # self.reference[env_id,:]  = torch.from_numpy(self.reference[env_id,:]).to(self.sim.device, dtype=torch.float32)
         self.random_start_idx = np.random.randint(0,int(2/self.dt))  # Find a random position to start the system at first 2 seconds
         # change the joint position of the lower body joints to enable RSI
 
-        # --------------------------    Gait Generator System    --------------------------#
+        # # --------------------------    Gait Generator System    --------------------------#
 
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
@@ -219,16 +243,44 @@ class LocomotionEnv(DirectRLEnv):
         self._compute_intermediate_values()
 
 
-    def findgait(self,input_vec):
+    def findgait(self, input_vec: torch.Tensor) -> torch.Tensor:
+        """
+        input_vec: [N, D] or [D]
+        returns:   [N, T, C] torch.Tensor
+        """
 
+        # Ensure batch dimension
+        if input_vec.ndim == 1:
+            input_vec = input_vec.unsqueeze(0)         # [1, D]
+
+        N = input_vec.shape[0]
+
+        # Forward network: [N, 204]
         freqs = self.gaitgen_net(input_vec)
-        predictions = freqs.reshape(-1,6,2,17)
-        predictions = predictions.detach().numpy()
-        predictions = predictions[0]
-        predictions = self.denormalize(predictions)
-        pred_time = self.pred_ifft(predictions)
 
-        return pred_time
+        # Reshape to [N, 6, 2, 17]
+        predictions = freqs.view(N, 6, 2, 17)
+
+        # → Convert to numpy for your existing post-processing code
+        predictions_np = predictions.detach().cpu().numpy()
+
+        # Process each environment individually
+        pred_list = []
+        for n in range(N):
+            single_pred = predictions_np[n]                     # [6, 2, 17]
+            single_pred = self.denormalize(single_pred)         # numpy [6, 2, 17]
+            single_time = self.pred_ifft(single_pred)           # numpy [T, C]
+            pred_list.append(single_time)
+
+        # Stack: numpy [N, T, C]
+        pred_np = np.stack(pred_list, axis=0)
+
+        # Convert back to torch on device
+        pred_torch = torch.from_numpy(pred_np).to(self.sim.device, dtype=torch.float32)
+
+        return pred_torch
+
+
 
     def denormalize(self,pred):
         #form is [5,2,17]
@@ -252,7 +304,7 @@ class LocomotionEnv(DirectRLEnv):
             num_samples = int((pred_time.shape[0]) * (1/self.dt)/(org_rate))  # resample with self.dt
             # Upsample using Fourier method
             pred_time = resample(pred_time, num_samples, axis=0)
-            pred_time = np.tile(pred_time, (50,1))    # Create loop for reference movement
+            pred_time = np.tile(pred_time, (10,1))    # Create loop for reference movement
         return pred_time
 
 @torch.jit.script
