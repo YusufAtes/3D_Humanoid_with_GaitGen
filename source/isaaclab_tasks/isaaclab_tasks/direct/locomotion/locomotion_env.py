@@ -51,20 +51,38 @@ class LocomotionEnv(DirectRLEnv):
         # # --------------------------    Gait Generator System    --------------------------#
 
         self.gaitgen_net = SimpleFCNN()
-        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\final_model.pth',weights_only=True))
+        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\FINAL_BEST_MODEL.pth',weights_only=True))
         self.gaitgen_net.to(self.sim.device)
         self.gaitgen_net.eval()
 
-        self.normalizationconst = np.load(rf"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\newnormalization_constants.npy")
-        self.leg_len = 0.94
-        self.dt = self.physics_dt 
+        self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\mean.npy")
+        self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\std.npy")
+        self.leg_len = 0.83
+        self.hip_knee = 0.4
+        self.knee_ankle = 0.39
+        self.dt = self.step_dt 
         self.reference = torch.empty(
-            (self.num_envs, 3840, 6),
+            (self.num_envs, 1920, 4),
             device=self.sim.device,
             dtype=torch.float32,
         )
 
+        # TESTING SETTING
+        self.test_speed: float | None = None
+        self.use_test_speed: bool = False
+        self.random_start_idx = torch.zeros((self.cfg.terrain.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
+        self.desired_speeds = torch.zeros((self.cfg.terrain.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
+
         # # --------------------------    Gait Generator System    --------------------------#
+
+    def set_test_speed(self, speed: float | None):
+        """If speed is not None, all envs will use this fixed speed at reset."""
+        if speed is None:
+            self.test_speed = None
+            self.use_test_speed = False
+        else:
+            self.test_speed = float(speed)
+            self.use_test_speed = True
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -148,35 +166,32 @@ class LocomotionEnv(DirectRLEnv):
         if self.reference is not None:
             T = self.reference.shape[1]
             # physics steps since reset ≈ episode_length * decimation
-            step_idx = self.episode_length_buf * self.cfg.decimation + self.random_start_idx
+            self.step_idx = self.episode_length_buf + self.random_start_idx
             # clamp to leave room for t+10
             max_idx = T - 11
-            step_idx = torch.clamp(step_idx, 0, max_idx)
             env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
-            current_ref   = self.reference[env_ids,step_idx,:]
-            future_reft1  = self.reference[env_ids,step_idx + 1,:]
-            future_reft10 = self.reference[env_ids,step_idx + 10,:]
-
+            self.current_ref = self.reference[env_ids,self.step_idx,:]
+            future_reft1 = self.reference[env_ids,self.step_idx + 1,:]
+            future_reft10 = self.reference[env_ids,self.step_idx + 10,:]
+            print(self.current_ref.shape)
+            print(self.reference.shape)
+            print(obs.shape)
             obs = torch.cat(
                 (
                     obs,
-                    current_ref,
+                    self.current_ref,
                     future_reft1,
                     future_reft10
                 ),
                 dim=-1
                 )
+            print(obs.shape)
         # # --------------------------    Gait Generator System    --------------------------#
 
         observations = {"policy": obs}
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-
-    # --------------------------    Gait Generator System    --------------------------#
-
-
-    # --------------------------    Gait Generator System    --------------------------#
 
         total_reward = compute_rewards(
             self.actions,
@@ -195,6 +210,10 @@ class LocomotionEnv(DirectRLEnv):
             self.cfg.death_cost,
             self.cfg.alive_reward_scale,
             self.motor_effort_ratio,
+            self.current_ref,
+            self.dof_pos,
+            self.vel_loc,
+            self.desired_speeds,
         )
         return total_reward
 
@@ -214,21 +233,55 @@ class LocomotionEnv(DirectRLEnv):
         joint_vel = self.robot.data.default_joint_vel[env_ids]
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
-
+        
         # # --------------------------    Gait Generator System    --------------------------#
+        i = 0
         for env_id in env_ids:
-            self.reference_speed = np.random.uniform(0.2,3.0)
+            if self.use_test_speed and (self.test_speed is not None):
+                self.reference_speed = self.test_speed
+                random_idx = None
+            else:
+                self.reference_speed = np.random.uniform(0.2, 2.4)
+                random_idx = np.random.randint(0,int(1/self.dt))
             encoder_vec = torch.empty((3),device=self.sim.device)   
 
-            encoder_vec[0] = self.reference_speed/3
-            encoder_vec[1] = self.leg_len /1.5
-            encoder_vec[2] = self.leg_len /1.5
+            encoder_vec[0] = self.reference_speed/2.4
+            encoder_vec[1] = self.leg_len /1.0
+            encoder_vec[2] = self.leg_len /1.0
 
             self.reference[env_id,:] = self.findgait(encoder_vec)                     #Find the gait
             self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
-            # self.reference[env_id,:]  = torch.from_numpy(self.reference[env_id,:]).to(self.sim.device, dtype=torch.float32)
-        self.random_start_idx = np.random.randint(0,int(2/self.dt))  # Find a random position to start the system at first 2 seconds
-        # change the joint position of the lower body joints to enable RSI
+            # self.reference[:,2] = -self.reference[:,2]
+            # self.reference[:,5] = -self.reference[:,5]
+            self.desired_speeds[env_id] = self.reference_speed
+            
+            if random_idx:
+                self.random_start_idx[env_id] = random_idx
+
+                rhip_pos = self.reference[env_id,random_idx,0]
+                lhip_pos = self.reference[env_id,random_idx,2]
+
+                rknee_pos = self.reference[env_id,random_idx,1]
+                lknee_pos = self.reference[env_id,random_idx,3]
+
+                hip_rad = lhip_pos if torch.abs(rhip_pos) > torch.abs(lhip_pos) else rhip_pos
+                knee_rad = lknee_pos if torch.abs(rknee_pos) > torch.abs(lknee_pos) else rknee_pos
+
+                hip_short = self.hip_knee - (torch.cos(hip_rad) * self.hip_knee)
+                knee_short = self.knee_ankle - (torch.cos(knee_rad) * self.knee_ankle)
+                total_short = hip_short + knee_short - 0.03 if (hip_short+knee_short) > 0.05 else 0
+                # -------------------- RSI ON -----------------------------#
+                joint_pos[i,10] = rhip_pos
+                joint_pos[i,15] = rknee_pos
+
+                joint_pos[i,13] = lhip_pos
+                joint_pos[i,16] = lknee_pos
+
+                default_root_state[i, 2] -= (total_short)
+
+                i+=1
+                
+                # -------------------- RSI ON -----------------------------#
 
         # # --------------------------    Gait Generator System    --------------------------#
 
@@ -258,17 +311,16 @@ class LocomotionEnv(DirectRLEnv):
         # Forward network: [N, 204]
         freqs = self.gaitgen_net(input_vec)
 
-        # Reshape to [N, 6, 2, 17]
-        predictions = freqs.view(N, 6, 2, 17)
-
         # → Convert to numpy for your existing post-processing code
-        predictions_np = predictions.detach().cpu().numpy()
+        predictions_np = freqs.detach().cpu().numpy()
 
         # Process each environment individually
         pred_list = []
         for n in range(N):
-            single_pred = predictions_np[n]                     # [6, 2, 17]
-            single_pred = self.denormalize(single_pred)         # numpy [6, 2, 17]
+            single_out = predictions_np[n]                     # Currently Flatten
+            single_pred = single_out[:136]
+            single_pred = self.denormalize(single_pred,self.mean,self.std)         # numpy [6, 2, 17]
+            single_pred = self.recover_shape(single_pred)
             single_time = self.pred_ifft(single_pred)           # numpy [T, C]
             pred_list.append(single_time)
 
@@ -280,32 +332,39 @@ class LocomotionEnv(DirectRLEnv):
 
         return pred_torch
 
+    def denormalize(self,pred_flat, mean, std):
+        """Reverses the Standard Score normalization."""
+        return (pred_flat * std) + mean
 
+    def recover_shape(self,flat_data):
+        """
+        Reconstructs (4, 2, 17) from flat (136,) vector.
+        """
+        # 1. Reshape to creation shape: (Freqs=17, Joints=4, Real/Imag=2)
+        recovered = flat_data.reshape(17, 4, 2)
+        # 2. Transpose to IFFT shape: (Joints=4, Real/Imag=2, Freqs=17)
+        structured = recovered.transpose(1, 2, 0)
+        return structured
 
-    def denormalize(self,pred):
-        #form is [5,2,17]
-        for i in range(17):
-            for k in range(2):
-                pred[:,k,i] = pred[:,k,i] * self.normalizationconst[i*2+k]
-        return pred
-    
-        
     def pred_ifft(self,predictions):
-        #form is [5,2,17]
-        real_pred = predictions[:,0,:]
-        imag_pred = predictions[:,1,:]
-        predictions = real_pred + 1j*imag_pred
-
-        pred_time = np.fft.irfft(predictions, axis=1)
-        pred_time = pred_time.transpose(1,0)
+        """
+        Performs Inverse FFT to get time-domain signals.
+        """
+        # Combine Real and Imaginary parts
+        complex_pred = predictions[:, 0, :] + 1j * predictions[:, 1, :]
         org_rate = 10
-
+        # Inverse FFT (n=32 points)
+        pred_time = np.fft.irfft(complex_pred, n=32, axis=1)
+        pred_time = pred_time.transpose(1,0)
+        # Transpose for plotting: (Time, Joints)
         if self.dt < 0.1:
             num_samples = int((pred_time.shape[0]) * (1/self.dt)/(org_rate))  # resample with self.dt
             # Upsample using Fourier method
             pred_time = resample(pred_time, num_samples, axis=0)
             pred_time = np.tile(pred_time, (10,1))    # Create loop for reference movement
         return pred_time
+    
+
 
 @torch.jit.script
 def compute_rewards(
@@ -325,16 +384,25 @@ def compute_rewards(
     death_cost: float,
     alive_reward_scale: float,
     motor_effort_ratio: torch.Tensor,
+    reference_state: torch.Tensor,
+    dof_pos : torch.Tensor,
+    vel_loc : torch.Tensor,
+    desired_speeds : torch.Tensor,
 ):
+    # ----------------- base humanoid rewards ----------------- #
     heading_weight_tensor = torch.ones_like(heading_proj) * heading_weight
-    heading_reward = torch.where(heading_proj > 0.8, heading_weight_tensor, heading_weight * heading_proj / 0.8)
+    heading_reward = torch.where(
+        heading_proj > 0.8,
+        heading_weight_tensor,
+        heading_weight * heading_proj / 0.8,
+    )
 
     # aligning up axis of robot and environment
     up_reward = torch.zeros_like(heading_reward)
     up_reward = torch.where(up_proj > 0.93, up_reward + up_weight, up_reward)
 
     # energy penalty for movement
-    actions_cost = torch.sum(actions**2, dim=-1)
+    actions_cost = torch.sum(actions ** 2, dim=-1)
     electricity_cost = torch.sum(
         torch.abs(actions * dof_vel * dof_vel_scale) * motor_effort_ratio.unsqueeze(0),
         dim=-1,
@@ -345,20 +413,57 @@ def compute_rewards(
 
     # reward for duration of staying alive
     alive_reward = torch.ones_like(potentials) * alive_reward_scale
-    progress_reward = potentials - prev_potentials
+    progress_reward = (potentials - prev_potentials) * 0.5
 
+    # ----------------- Gait Generator imitation ----------------- #
+
+    imitation_reward = torch.zeros_like(heading_reward)
+    imitation_weight_hip_pos = 1.5
+    imitation_weight_knee_pos = 1.5
+    imitation_weight_ankle_pos = 0.25
+    vel_weight = 2.0
+
+    # hips
+    hip_joint_pos = dof_pos[:, [10, 13]]          # [N, 2]
+    hip_ref_pos   = reference_state[:, [0, 2]]           # [N, 2]
+    hip_diff      = hip_joint_pos - hip_ref_pos          # [N, 2]
+    hip_dist      = torch.norm(hip_diff, p=2, dim=-1)    # [N]
+    imitation_reward = imitation_reward + \
+        imitation_weight_hip_pos * torch.exp(-5.0 * hip_dist)
+
+    # knees
+    knee_joint_pos = dof_pos[:, [15, 16]]         # [N, 2]
+    knee_ref_pos   = reference_state[:, [1, 3]]          # [N, 2]
+    knee_diff      = knee_joint_pos - knee_ref_pos
+    knee_dist      = torch.norm(knee_diff, p=2, dim=-1)
+    imitation_reward = imitation_reward + \
+        imitation_weight_knee_pos * torch.exp(-5.0 * knee_dist)
+
+    vel_error = torch.norm(vel_loc[:, 0] - desired_speeds)
+    vel_reward = torch.exp(-2.0 * vel_error) * vel_weight
+    # ----------------- Gait Generator imitation ----------------- #
+
+    # ----------------- total reward ----------------- #
     total_reward = (
         progress_reward
         + alive_reward
         + up_reward
         + heading_reward
+        + imitation_reward
+        + vel_reward
         - actions_cost_scale * actions_cost
         - energy_cost_scale * electricity_cost
         - dof_at_limit_cost
     )
+
     # adjust reward for fallen agents
-    total_reward = torch.where(reset_terminated, torch.ones_like(total_reward) * death_cost, total_reward)
+    total_reward = torch.where(
+        reset_terminated,
+        torch.ones_like(total_reward) * death_cost,
+        total_reward,
+    )
     return total_reward
+
 
 
 @torch.jit.script
@@ -411,3 +516,4 @@ def compute_intermediate_values(
         prev_potentials,
         potentials,
     )
+

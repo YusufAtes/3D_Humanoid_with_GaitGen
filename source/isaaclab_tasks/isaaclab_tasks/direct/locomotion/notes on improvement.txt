@@ -1,0 +1,6 @@
+1 - increase hidden ater size to 1024-512   +
+2 - add symetric follow code of the arms against hips    -
+3 - Be sure of the angle adjustments are they looking down ?   +
+4 - Add reference velocity reward       (add later)
+5 - reward agianst ankle yaw and hip yaw    
+6 - add contact reward that gives positive reward if contact happens in ref and sim     (add later)

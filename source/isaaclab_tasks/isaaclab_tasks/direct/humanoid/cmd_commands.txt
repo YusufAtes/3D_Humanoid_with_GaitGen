@@ -1,0 +1,8 @@
+TEST:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --task Isaac-Humanoid-Direct-v0 --num_envs 1 --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_direct\2025-12-17_08-28-53_ppo_torch\checkpoints\best_agent.pt --headless --video --video_length 400
+
+TRAIN:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-Direct-v0 --num_envs 256 --headless 
+
+Tensorboard Reward Logger
+tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_direct\2025-12-17_08-28-53_ppo_torch
