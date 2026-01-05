@@ -173,9 +173,6 @@ class LocomotionEnv(DirectRLEnv):
             self.current_ref = self.reference[env_ids,self.step_idx,:]
             future_reft1 = self.reference[env_ids,self.step_idx + 1,:]
             future_reft10 = self.reference[env_ids,self.step_idx + 10,:]
-            print(self.current_ref.shape)
-            print(self.reference.shape)
-            print(obs.shape)
             obs = torch.cat(
                 (
                     obs,
@@ -185,7 +182,7 @@ class LocomotionEnv(DirectRLEnv):
                 ),
                 dim=-1
                 )
-            print(obs.shape)
+
         # # --------------------------    Gait Generator System    --------------------------#
 
         observations = {"policy": obs}

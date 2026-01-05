@@ -36,7 +36,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     amp_observation_space = 81
 
     early_termination = True
-    termination_height = 0.5
+    termination_height = 0.7
 
     motion_file: str = MISSING
     reference_body = "torso"
@@ -59,7 +59,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=10.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=10.0, replicate_physics=True)
 
     # robot
     robot: ArticulationCfg = HUMANOID_28_CFG.replace(prim_path="/World/envs/env_.*/Robot").replace(
