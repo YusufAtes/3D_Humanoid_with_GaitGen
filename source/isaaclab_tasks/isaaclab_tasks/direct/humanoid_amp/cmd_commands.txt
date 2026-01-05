@@ -13,10 +13,10 @@ tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_direct\2025-12-2
 HUMANOID AMP
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_walk\2026-01-03_14-01-02_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Walk-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 400
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_walk\2026-01-03_14-01-02_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 400
 
 TRAIN:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Walk-Direct-v0 --num_envs 256 --headless 
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 256 --headless 
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_walk\2026-01-03_14-01-02_amp_torch
