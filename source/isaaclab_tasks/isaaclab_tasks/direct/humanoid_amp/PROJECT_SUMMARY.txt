@@ -1,0 +1,602 @@
+================================================================================
+PROJECT SUMMARY: Human Imitated Bipedal Locomotion with Frequency-Based 
+                 Gait Generator Network (3D Extension)
+================================================================================
+Generated: January 2026
+Reference Paper: arXiv:2511.17387 (Ates & Morgul, Bilkent University)
+Project Location: IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/humanoid_amp/
+
+================================================================================
+1. PROJECT OVERVIEW
+================================================================================
+
+This project extends the 2D frequency-based gait generator framework described 
+in arXiv:2511.17387 to a full 3D humanoid robot simulation using NVIDIA Isaac 
+Lab and the SKRL reinforcement learning library.
+
+CORE CONCEPT:
+A lightweight framework that combines a gait generator network (trained on 
+human MoCap data in the frequency domain) with Proximal Policy Optimization 
+(PPO) and Adversarial Motion Priors (AMP) for natural bipedal locomotion.
+
+KEY INNOVATION:
+- Training gait references in FFT (frequency) domain from MoCap data
+- Using spectral motion priors to generate smooth, speed-conditioned gaits
+- Combining imitation learning with task-based reinforcement learning
+
+CURRENT STATUS:
+- The model achieves natural walking gait up to ~1.4 m/s
+- Target: Extend maximum speed beyond 2.0 m/s while maintaining natural gait
+- Active experimentation with timestep and reward coefficient tuning
+
+================================================================================
+2. PREVIOUS WORK (2D - arXiv:2511.17387)
+================================================================================
+
+SIMULATION PLATFORM: PyBullet (2D planar simulation)
+
+ROBOT MODEL:
+- 7 Degree of Freedom (DoF) planar biped
+- Torso-hip joint + bilateral hip, knee, ankle joints
+- Combined HAT (head-arms-trunk) model
+
+GAIT GENERATOR NETWORK:
+- Input: [velocity, right_leg_length, left_leg_length] → 3D vector
+- Output: Joint angles reconstructed from 32-point FFT → [32 × 6]
+- Architecture: 2-layer MLP (512 units, ReLU), Adam optimizer, 1e-4 learning rate
+- Training Data: Schreiber & Moissenet (2019) dataset with 1143 gait trials, 
+  50 participants
+
+DATA PROCESSING:
+- MoCap markers mapped to 6 joint angles (bilateral hip, knee, ankle)
+- Raw 100 Hz → low-pass filtered (5 Hz Butterworth) → downsampled to 10 Hz
+- FFT encoding: 32-point FFT (real + imaginary parts retained)
+- Inverse FFT reconstructs 3.2s cycles (32 frames)
+
+TRAINING METHODOLOGY:
+- PPO with torque control
+- Random State Initialization (RSI) for robust training
+- Imitation weight decay schedule
+- Gait-conditioned rewards + speed-conditioned objectives
+
+PERFORMANCE RESULTS:
+- Speed range: 0 – 2.2 m/s
+- Ramp tolerance: -15° to +15° slopes
+- Terrain perturbations: up to 10 cm noise amplitude
+- Smooth velocity tracking with ~0.1-0.2 m/s lag
+
+================================================================================
+3. PREVIOUS UNSUCCESSFUL APPROACH (Old Method)
+================================================================================
+
+LOCATION: source/isaaclab_tasks/isaaclab_tasks/direct/humanoid/humanoid_env.py
+
+Before the current AMP-based implementation, an initial attempt was made to 
+directly port the 2D gait generator approach to 3D using the standard Isaac Lab 
+locomotion environment (LocomotionEnv) without the AMP framework.
+
+APPROACH:
+- Used the same gait generator network architecture as the 2D case
+- Applied similar imitation reward terms (direct joint angle tracking)
+- Base environment: LocomotionEnv (standard PPO, no discriminator)
+- Robot: 21 DoF humanoid (HUMANOID_CFG)
+
+WHY IT FAILED:
+The direct translation from 2D to 3D was unsuccessful due to fundamental 
+differences in joint structure complexity:
+
+1. JOINT INDEX EXPLOSION: The 2D planar biped has only 7 DoF with 6 tracked 
+   joints (bilateral hip, knee, ankle). The 3D humanoid has 21-28 DoF including:
+   - Multi-axis hip joints (3 DoF each instead of 1)
+   - Waist/pelvis joints for torso rotation
+   - Arm joints (shoulders, elbows)
+   - Multi-axis foot joints
+   
+2. REFERENCE DIMENSIONALITY MISMATCH: The gait generator was trained on planar 
+   (sagittal plane) motion data producing 6 joint angles. In 3D, each leg 
+   requires additional frontal and transverse plane control that cannot be 
+   simply mapped from the 2D references.
+
+3. IMITATION REWARD SPARSITY: With only 4-6 joints tracked by the gait generator 
+   out of 21-28 total joints, the imitation signal was too sparse. The policy 
+   had no guidance for the remaining ~75% of joints, leading to unstable and 
+   unnatural motions.
+
+4. MISSING STYLE ENFORCEMENT: Without AMP's discriminator, there was no 
+   mechanism to enforce natural motion patterns for untracked joints. Pure 
+   imitation rewards on a subset of joints cannot produce natural full-body 
+   coordination.
+
+LESSON LEARNED:
+The AMP framework is essential for 3D humanoid control because:
+- The discriminator provides dense feedback for ALL joints, not just tracked ones
+- Style rewards from motion capture data encode natural coordination patterns
+- The policy learns to coordinate tracked joints (via imitation) with untracked 
+  joints (via AMP discriminator) simultaneously
+
+This failure motivated the current approach: use gait generator for gross leg 
+motion (hip/knee) while relying on AMP for full-body naturality.
+
+================================================================================
+4. CURRENT WORK (3D Extension - Isaac Lab)
+================================================================================
+
+SIMULATION PLATFORM: NVIDIA Isaac Lab (Isaac Sim based)
+
+ROBOT MODEL:
+- 28 DoF full 3D humanoid (HUMANOID_28_CFG from isaaclab_assets)
+- Key bodies: torso (reference), right_hand, left_hand, right_foot, left_foot
+- Implicit actuators with position control
+
+REGISTERED ENVIRONMENT:
+- ID: "Isaac-Humanoid-AMP-Imp-Direct-v0"
+- Entry Point: humanoid_amp_im_env:HumanoidAmpEnv
+- Config: humanoid_amp_im_env_cfg:HumanoidAmpEnvCfg
+
+GAIT GENERATOR NETWORK (Modified for 3D):
+- Architecture: SimpleFCNN class in gait_generator_net.py
+- Input: [speed/2.4, leg_length/1.0, leg_length/1.0] → 3D normalized vector
+- Output: 137 values (136 FFT coefficients + 1 period value)
+- Network: 3-layer MLP (512 hidden units, LeakyReLU 0.1 activation)
+- Trained separately, model saved as: kfold_results/FINAL_BEST_MODEL.pth
+
+FFT RECONSTRUCTION:
+- Frequency dimension: 17 (vs 32 in 2D)
+- Joints: 4 (right hip, right knee, left hip, left knee)
+- Shape recovery: flat (136,) → (17, 4, 2) → (4, 2, 17) [Joints, Real/Imag, Freqs]
+- IRFFT with n=32 points, resampled to match simulation dt
+
+JOINT MAPPINGS:
+- Hip joints: indices [12, 15] → right hip, left hip
+- Knee joints: indices [20, 21] → right knee, left knee
+
+DESIGN DECISION - ANKLE OMISSION:
+The 2D work included ankle joints as they contribute to natural walking gait.
+In the 3D extension, ankles are intentionally omitted from the gait generator
+for the following reasons:
+
+1. CONTACT DEPENDENCY: Ankle motion is highly dependent on ground contact 
+   timing, terrain variations, and balance corrections. Unlike hip/knee motion 
+   which follows predictable periodic patterns, ankle behavior is reactive.
+
+2. AMP FRAMEWORK COMPENSATION: The Adversarial Motion Prior (AMP) discriminator 
+   is trained on full-body motion capture data, including ankle movements. The 
+   discriminator enforces natural motion patterns across ALL joints, including 
+   ankles, through its style reward signal.
+
+3. SEPARATION OF CONCERNS: 
+   - Gait Generator → Handles predictable, periodic gross leg movement (hip/knee)
+   - AMP Discriminator → Enforces natural motion including contact-dependent 
+     behaviors (ankles, arms, torso coordination)
+   - RL Policy → Learns optimal ankle control through interaction
+
+This is a valid architectural choice that leverages the strengths of each 
+component while avoiding the complexity of predicting contact-dependent motion.
+
+================================================================================
+5. ENVIRONMENT CONFIGURATION
+================================================================================
+
+FILE: humanoid_amp_im_env_cfg.py
+
+SIMULATION PARAMETERS:
+- Episode length: 10.0 seconds
+- Decimation: 2 (physics steps per action)
+- Simulation dt: 1/60 seconds
+- Effective control frequency: 30 Hz
+
+OBSERVATION SPACE: 83 dimensions
+- Base observation: 81D (joint positions, velocities, body states)
+- Additional: phase (1D) + desired_speed (1D)
+
+ACTION SPACE: 28 dimensions (joint position targets)
+
+AMP CONFIGURATION:
+- num_amp_observations: 2 (history buffer)
+- amp_observation_space: 81
+- Total AMP observation: 162D
+
+TERMINATION CONDITIONS:
+- Early termination: enabled
+- Termination height: 0.7m (torso height threshold)
+
+================================================================================
+6. REWARD FUNCTION ANALYSIS
+================================================================================
+
+FILE: humanoid_amp_im_env.py, _get_rewards() method
+
+IMITATION REWARDS:
+1. Hip Position Tracking:
+   - Weight: 0.75
+   - Formula: 0.75 * exp(-5.0 * ||hip_joint_pos - hip_ref_pos||)
+   - Tracks: joints [12, 15] vs reference positions [0, 2]
+
+2. Knee Position Tracking:
+   - Weight: 0.75
+   - Formula: 0.75 * exp(-5.0 * ||knee_joint_pos - knee_ref_pos||)
+   - Tracks: joints [20, 21] vs reference positions [1, 3]
+
+VELOCITY REWARD:
+- Weight: 0.75
+- Formula: 0.75 * exp(-2.0 * (forward_speed - desired_speed)²)
+- Uses robot body-frame linear velocity (root_com_lin_vel_b)
+
+PENALTY:
+- Death cost: -10.0 (when torso drops below termination height)
+
+TOTAL REWARD = imitation_reward + vel_reward
+
+================================================================================
+7. TRAINING CONFIGURATION (SKRL AMP)
+================================================================================
+
+FILE: agents/skrl_walk_amp_im_cfg.yaml
+
+NETWORKS:
+- Policy: GaussianMixin, [1024, 512] layers, ReLU
+- Value: DeterministicMixin, [1024, 512] layers, ReLU  
+- Discriminator: DeterministicMixin, [1024, 512] layers, ReLU
+
+PPO HYPERPARAMETERS:
+- Learning rate: 5.0e-05
+- Rollouts: 16
+- Learning epochs: 4
+- Mini batches: 2
+- Discount factor (gamma): 0.99
+- Lambda (GAE): 0.95
+- Clip ratio: 0.2
+
+AMP HYPERPARAMETERS:
+- Task reward weight: 1.0
+- Style reward weight: 0.75
+- Discriminator batch size: 4096
+- Discriminator reward scale: 2.0
+- AMP batch size: 512
+
+MEMORY:
+- Motion dataset: 200,000 samples
+- Replay buffer: 1,000,000 samples
+
+TRAINING:
+- Total timesteps: 300,000
+- Recommended num_envs: 256
+
+================================================================================
+8. KEY WORKFLOW
+================================================================================
+
+INITIALIZATION:
+1. Load gait generator network (SimpleFCNN) with pretrained weights
+2. Load normalization parameters (mean.npy, std.npy)
+3. Initialize reference buffers: [num_envs, 96, 4] for joint trajectories
+4. Initialize phase tracking: phase, phase_step, periods per environment
+
+RESET (_reset_idx):
+1. Sample desired speed: uniform [0.2, 2.4] m/s (or fixed for demo mode)
+2. Create encoder vector: [speed/2.4, leg_len/1.0, leg_len/1.0]
+3. Generate gait via findgait():
+   - Forward pass through gaitgen_net
+   - Denormalize FFT coefficients
+   - IRFFT to time domain
+   - Resample to simulation timestep
+4. Apply Random State Initialization (RSI):
+   - Set initial joint positions from reference
+   - Adjust root height based on leg configuration
+
+STEP LOOP:
+1. Compute observation (compute_obs):
+   - Joint positions/velocities
+   - Root body state (height, orientation, velocities)
+   - Key body positions relative to root
+   - Phase and desired speed appended
+2. Update phase: phase_step = (episode_length_buf + phase_step) % periods
+3. Compute rewards:
+   - Lookup current reference from phase_step
+   - Calculate imitation and velocity rewards
+4. Update AMP observation buffer (history of 2 observations)
+
+================================================================================
+9. REQUIRED FIXES AND KNOWN PROBLEMS
+================================================================================
+
+*** CRITICAL BUG - PHASE CALCULATION (Line 169) ***
+
+CURRENT CODE:
+    self.phase_step = (self.episode_length_buf + self.phase_step) % self.periods
+
+PROBLEM:
+This accumulates phase_step incorrectly. At each step, it adds the current 
+episode length to the existing phase_step, causing rapid phase advancement.
+
+Example: If episode_length_buf goes 1,2,3,4...
+- Step 1: phase_step = (1 + 0) % P = 1
+- Step 2: phase_step = (2 + 1) % P = 3  (should be 2)
+- Step 3: phase_step = (3 + 3) % P = 6  (should be 3)
+- This causes phase to advance much faster than intended
+
+RECOMMENDED FIX:
+    self.phase_step = (self.episode_length_buf + self.random_start_idx) % self.periods
+
+This uses episode_length_buf directly as the step counter and adds the random 
+start offset set during RSI.
+
+IMPACT: High - affects gait reference timing and could cause jerky motion
+
+--------------------------------------------------------------------------------
+
+*** PROBLEM - DESIRED SPEED NORMALIZATION INCONSISTENCY ***
+
+LOCATION: _reset_idx() method
+
+CURRENT CODE:
+    Demo mode:   self.desired_speeds[env_id] = self.test_speed (raw value)
+    Train mode:  self.desired_speeds[env_id] = self.reference_speed / 2.4 (normalized)
+
+PROBLEM:
+The velocity reward uses desired_speeds directly:
+    vel_reward_fwd = torch.exp(-2.0 * (forward_speed - self.desired_speeds)**2)
+
+In demo mode, if test_speed = 1.5, the reward expects 1.5 m/s
+In training, desired_speeds is normalized (e.g., 0.625 for 1.5 m/s)
+
+This mismatch means training optimizes for normalized targets while evaluation 
+uses raw targets, potentially causing significant behavioral differences.
+
+RECOMMENDED FIX:
+Consistently use raw speed values in desired_speeds for both modes, OR normalize 
+forward_speed when comparing. Choose one convention and apply everywhere.
+
+IMPACT: Medium-High - causes training/evaluation mismatch
+
+--------------------------------------------------------------------------------
+
+*** PROBLEM - REFERENCE CLAMPING INCONSISTENCY ***
+
+LOCATION: _reset_idx() method
+
+CURRENT CODE:
+    Demo mode:   torch.clamp(self.reference[env_id,:], -np.pi/2, np.pi/2)
+    Train mode:  Hip clipped to [-π/2, π/2], Knee clipped to [-π, 0]
+
+PROBLEM:
+Different clamping ranges between demo and training modes. In demo mode, knees 
+are clamped to [-π/2, π/2] instead of [-π, 0], potentially allowing invalid 
+knee angles (positive extension).
+
+RECOMMENDED FIX:
+Use consistent clamping for both modes:
+    self.reference[env_id, :, [0,2]] = torch.clamp(..., -np.pi/2, np.pi/2)  # hips
+    self.reference[env_id, :, [1,3]] = torch.clamp(..., -np.pi, 0)          # knees
+
+IMPACT: Medium - may cause evaluation behavior to differ from training
+
+--------------------------------------------------------------------------------
+
+*** PROBLEM - LATERAL VELOCITY NOT PENALIZED ***
+
+LOCATION: _get_rewards() method (Line 227)
+
+CURRENT CODE:
+    vel_error_lat = torch.abs(lateral_speed)          # computed but unused
+    # vel_reward_lat = torch.exp(-3.0 * vel_error_lat**2)  # COMMENTED OUT
+    vel_reward = vel_weight * (vel_reward_fwd)        # only forward used
+
+PROBLEM:
+In 3D, lateral drift is possible but not penalized. The robot can achieve high 
+forward velocity reward while drifting sideways, leading to unnatural curved 
+walking paths.
+
+RECOMMENDED FIX:
+Uncomment and include lateral penalty:
+    vel_reward_lat = torch.exp(-3.0 * vel_error_lat**2)
+    vel_reward = vel_weight * (vel_reward_fwd * vel_reward_lat)
+
+Or add as separate penalty term with appropriate weighting.
+
+IMPACT: Medium - allows sideways drift, unnatural 3D walking
+
+--------------------------------------------------------------------------------
+
+*** POTENTIAL ISSUE - MORPHOLOGY PARAMETERS ***
+
+LOCATION: __init__ method (Lines 68-70)
+
+CURRENT CODE:
+    self.leg_len = 0.83
+    self.hip_knee = 0.4
+    self.knee_ankle = 0.39
+
+CONCERN:
+These values are hardcoded and may not match the actual HUMANOID_28 model 
+dimensions. The gait generator was trained with specific morphology assumptions.
+
+RECOMMENDATION:
+Verify these values against the HUMANOID_28 URDF/USD model. If mismatched, 
+either update these constants or extract them from the robot model at runtime.
+
+IMPACT: Low-Medium - may affect gait phase accuracy
+
+================================================================================
+10. CURRENT EXPERIMENTATION STATUS
+================================================================================
+
+GOAL: Achieve natural walking at speeds > 2.0 m/s
+
+CURRENT BEST RESULT:
+- Natural walking gait achieved
+- Maximum stable speed: ~1.4 m/s
+- Target: > 2.0 m/s
+
+PARAMETERS BEING TUNED:
+- Reward coefficients (imitation weights, velocity weight)
+- Training duration
+
+POTENTIAL SPEED LIMITING FACTORS:
+
+1. REWARD BALANCE: High imitation weights may constrain the policy to 
+   conservative walking patterns. At higher speeds, the gait pattern 
+   fundamentally changes (longer strides, shorter contact times).
+
+2. PHASE BUG: The phase calculation bug (Section 8) could cause reference 
+   timing issues that become more pronounced at higher speeds.
+
+3. GAIT GENERATOR ACCURACY: Verify the gait generator produces valid 
+   references for speeds > 1.5 m/s. Test standalone before RL training.
+
+4. TRAINING SPEED DISTRIBUTION: Current sampling is uniform [0.2, 2.4] m/s.
+   The policy may not get enough experience at higher speeds.
+
+================================================================================
+11. RECOMMENDED EXTENSIONS
+================================================================================
+
+*** HIGH PRIORITY - FOR ACHIEVING > 2.0 m/s ***
+
+1. SPEED-CONDITIONED CURRICULUM LEARNING
+   WHAT: Progressively increase target speed range during training
+   HOW: Start training with [0.2, 1.0] m/s, then expand to [0.5, 1.5] m/s, 
+        finally [0.2, 2.4] m/s after policy stabilizes at each stage
+   BENEFIT: Allows policy to master low-speed walking first, then extend 
+            to higher speeds without catastrophic forgetting
+
+2. IMITATION WEIGHT DECAY SCHEDULE
+   WHAT: Gradually reduce imitation reward weight during training
+   HOW: Start with high imitation weight (e.g., 1.0), decay to lower value 
+        (e.g., 0.3) over training timesteps using linear or exponential decay
+   BENEFIT: Early training follows references closely for stable gaits; later 
+            training allows policy freedom to discover faster locomotion 
+            strategies. This was used successfully in the 2D work.
+
+3. SPEED-BIASED SAMPLING
+   WHAT: Sample target speeds with bias toward underperforming ranges
+   HOW: Track success rate per speed bin; sample more frequently from speeds 
+        where the robot fails or underperforms
+   BENEFIT: Allocates more training time to challenging speed ranges (> 1.5 m/s)
+
+*** MEDIUM PRIORITY - FOR ROBUSTNESS ***
+
+4. TERRAIN GENERALIZATION
+   WHAT: Enable slope and noisy terrain during training
+   HOW: Uncomment terrain configuration in humanoid_amp_im_env_cfg.py; 
+        use the existing custom_terrains.py implementations
+   BENEFIT: Produces policies robust to terrain variations; validates 
+            that 3D extension matches 2D robustness claims
+
+5. ROOT ORIENTATION REWARD
+   WHAT: Add reward for maintaining upright posture
+   HOW: Penalize deviation of torso orientation from vertical; can use 
+        quaternion distance or projected gravity vector
+   BENEFIT: Critical for 3D stability; prevents sideways lean and rotation 
+            that aren't issues in 2D planar simulation
+
+6. ENERGY EFFICIENCY REWARD
+   WHAT: Penalize excessive joint torques and velocities
+   HOW: Add negative reward proportional to sum of squared torques or 
+        joint velocity magnitudes
+   BENEFIT: Produces more natural, efficient gaits; prevents jittery high-
+            frequency control actions; mentioned in 2D paper
+
+*** LOWER PRIORITY - FOR ENHANCED NATURALITY ***
+
+7. ARM SWING COORDINATION
+   WHAT: Add upper body motion references or rewards
+   HOW: Either extend gait generator to output arm angles, or add reward 
+        for contralateral arm-leg coordination (left arm forward with right leg)
+   BENEFIT: More natural full-body walking appearance
+
+8. CONTACT-AWARE ANKLE REWARD
+   WHAT: Add reward based on foot contact timing and force distribution
+   HOW: Track foot contact states; reward heel-strike to toe-off progression; 
+        penalize flat-footed or toe-first contacts
+   BENEFIT: Improves ground contact quality without explicit ankle references
+
+9. GAIT TRANSITION SMOOTHING
+   WHAT: Smooth transitions when target speed changes mid-episode
+   HOW: Interpolate between gait references when desired_speed changes; 
+        add reward for smooth joint acceleration profiles
+   BENEFIT: Enables realistic speed variation during single episodes; 
+            demonstrated in 2D work's velocity tracking demo
+
+================================================================================
+12. FILE STRUCTURE
+================================================================================
+
+humanoid_amp/
+├── __init__.py                    # Gym environment registration
+├── humanoid_amp_im_env.py         # Main environment (with gait generator)
+├── humanoid_amp_im_env_cfg.py     # Environment configuration
+├── humanoid_amp_env.py            # Base AMP environment (without gait gen)
+├── humanoid_amp_env_cfg.py        # Base AMP config
+├── gait_generator_net.py          # Neural network definition
+├── custom_terrains.py             # Slope and noisy terrain generators
+├── cmd_commands.txt               # Training/testing commands
+├── PROJECT_SUMMARY.txt            # This document
+├── agents/
+│   ├── skrl_walk_amp_im_cfg.yaml  # SKRL training config (main)
+│   └── ...                        # Other agent configs
+├── gait reference phase 2/
+│   ├── mean.npy                   # Normalization mean
+│   ├── std.npy                    # Normalization std
+│   └── ...                        # Training data
+├── kfold_results/
+│   ├── FINAL_BEST_MODEL.pth       # Trained gait generator
+│   └── ...                        # K-fold validation results
+└── motions/
+    ├── humanoid_walk.npz          # Reference motion data
+    └── motion_loader.py           # Motion loading utilities
+
+================================================================================
+13. TRAINING COMMANDS
+================================================================================
+
+TRAIN:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py \
+    --task Isaac-Humanoid-AMP-Imp-Direct-v0 \
+    --num_envs 256 \
+    --headless
+
+TEST:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py \
+    --checkpoint <checkpoint_path> \
+    --task Isaac-Humanoid-AMP-Imp-Direct-v0 \
+    --num_envs 1 \
+    --algorithm AMP
+
+TENSORBOARD:
+tensorboard --logdir <log_directory> --port 6006 --host 127.0.0.1
+
+================================================================================
+14. DEPENDENCIES
+================================================================================
+
+- NVIDIA Isaac Lab (Isaac Sim based)
+- SKRL reinforcement learning library
+- PyTorch
+- NumPy
+- SciPy (for signal resampling)
+- Gymnasium
+
+================================================================================
+15. REFERENCES
+================================================================================
+
+[1] Ates, Y.B. & Morgul, O. (2025). Human Imitated Bipedal Locomotion with 
+    Frequency Based Gait Generator Network. arXiv:2511.17387
+
+[2] Peng, X.B., Ma, Z., Abbeel, P., Levine, S., & Kanazawa, A. (2021). 
+    AMP: Adversarial Motion Priors for Stylized Physics-Based Character Control. 
+    ACM Transactions on Graphics (TOG), 40(4):1-20. (SIGGRAPH 2021)
+
+[3] Schreiber, C. & Moissenet, F. (2019). A multimodal dataset of human gait 
+    at different walking speeds. Scientific Data, 6(1):111
+
+[4] Peng, X.B. et al. (2018). DeepMimic: Example-guided deep reinforcement 
+    learning of physics-based character skills. ACM TOG, 37(4):1-14
+
+[5] Schulman, J. et al. (2017). Proximal Policy Optimization Algorithms. 
+    arXiv:1707.06347
+
+================================================================================
+END OF DOCUMENT
+================================================================================

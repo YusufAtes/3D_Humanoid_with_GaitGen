@@ -166,7 +166,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         if self.reference is not None:
 
             # physics steps since reset ≈ episode_length * decimation
-            self.phase_step = (self.episode_length_buf + self.phase_step) % self.periods
+            self.phase_step = int(self.episode_length_buf + self.random_start_idx) % self.periods
             self.phase = self.phase_step / self.periods
 
             obs = torch.cat(
@@ -189,14 +189,20 @@ class HumanoidAmpEnv(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
+        total_reward = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
+
         imitation_weight_hip_pos = 0.5
         imitation_weight_knee_pos = 0.5
-        vel_weight = 1.0
+        fwd_vel_weight = 0.75
+        lat_vel_weight = 0.2
+        yaw_vel_weight = 0.2
+        death_cost = -1.0
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
 
         current_ref_pos   = self.reference[env_ids,self.phase_step,:]           # [N,6]
+
         # hips
         hip_joint_pos = self.robot.data.joint_pos[:, [12, 15]]          # [N, 2]
         hip_ref_pos = current_ref_pos[:,[0,2]]
@@ -211,22 +217,27 @@ class HumanoidAmpEnv(DirectRLEnv):
         knee_dist      = torch.norm(knee_diff, p=2, dim=-1)
         imitation_reward = imitation_reward + imitation_weight_knee_pos * torch.exp(-5.0 * knee_dist)
 
+        # Body velocity
         vel_b = self.robot.data.root_com_lin_vel_b  # [N, 3]
+        vel_ang = self.robot.data.root_com_ang_vel_b  # [N, 3]
 
         # Decompose
         forward_speed  = vel_b[:, 0]   # along robot-forward (x)
         lateral_speed  = vel_b[:, 1]   # sideways (y)
-        vertical_speed = vel_b[:, 2]   # up/down (z)
+        yaw_speed = vel_ang[:, 2]   # yaw (w)
 
-        # Example: penalize lateral drift, reward forward speed
-        vel_error_lat = torch.abs(lateral_speed)          # want ~0
-        vel_reward_fwd = torch.exp(-2.0 * (forward_speed - self.desired_speeds)**2)
-        # print(f"forward_speed: {forward_speed}, desired_speeds: {self.desired_speeds}")
-        # vel_reward_lat = torch.exp(-3.0 * vel_error_lat**2)
+        # Reward forward speed and penalize lateral drift and yaw drift
+        vel_reward_fwd = torch.exp(-3.0 * (forward_speed - (self.desired_speeds * 2.4))**2)
+        vel_reward = fwd_vel_weight * vel_reward_fwd
+        vel_reward += lat_vel_weight * torch.exp(-2.0 * torch.abs(lateral_speed))
+        vel_reward += yaw_vel_weight * torch.exp(-2.0 * torch.abs(yaw_speed))
 
-        vel_reward = vel_weight * (vel_reward_fwd)
+        total_reward = imitation_reward + vel_reward 
 
-        return vel_reward + imitation_reward
+        died = self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height
+        total_reward = torch.where(died, torch.ones_like(total_reward) * death_cost, total_reward)
+
+        return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
@@ -241,6 +252,12 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         if self.cfg.early_termination:
             died = self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height
+            if self.demo_mode and died:
+                x_pos = self.robot.data.body_pos_w[0, self.ref_body_index, 0].item()
+                step = int(self.episode_length_buf.item())
+                t = step * float(self.dt)
+                self.avg_speed = x_pos / t
+                print("Average speed:", self.avg_speed)
         else:
             died = torch.zeros_like(time_out)
 
@@ -267,26 +284,28 @@ class HumanoidAmpEnv(DirectRLEnv):
         i = 0
         for env_id in env_ids:
             if self.demo_mode and (self.test_speed is not None):
-                self.desired_speeds[env_id] = self.test_speed
-                self.reference_speed = self.test_speed
+                self.desired_speeds[env_id] = self.test_speed / 2.4
+                self.reference_speed = self.test_speed / 2.4
                 random_idx = None
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed/2.4
+                encoder_vec[0] = self.reference_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
                 self.reference[env_id,:], self.periods[env_id] = self.findgait(encoder_vec) 
-                self.phase_step[env_id] = 0
-                self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
+                
+                self.phase_step[env_id] = 0             #fix this part it should not be 0 it should be closest index to 0 degree
+                self.reference[env_id,[0,2]]  = torch.clamp(self.reference[env_id,[0,2]] , -np.pi/2, np.pi/2)     #Clip the hip angle
+                self.reference[env_id,[1,3]]  = torch.clamp(self.reference[env_id,[1,3]] , -np.pi, 0)     
                 root_state[i, 2] += 0.4
 
             else:
-                self.reference_speed = np.random.uniform(0.2, 2.4)
+                self.reference_speed = np.random.uniform(0.1, 2.4) / 2.4
                 random_idx = np.random.randint(0,int(3/self.dt))
-                self.desired_speeds[env_id] = self.reference_speed / 2.4
+                self.desired_speeds[env_id] = self.reference_speed 
                 
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed/2.4
+                encoder_vec[0] = self.reference_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
