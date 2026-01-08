@@ -34,8 +34,8 @@ class HumanoidAmpEnv(DirectRLEnv):
         dof_upper_limits = self.robot.data.soft_joint_pos_limits[0, :, 1]
         self.action_offset = 0.5 * (dof_upper_limits + dof_lower_limits)
         # The scale must be half the range to map [-1, 1] to the limits
-        # self.action_scale = 0.5 * (dof_upper_limits - dof_lower_limits)
-        self.action_scale = dof_upper_limits - dof_lower_limits
+        self.action_scale = 0.5 * (dof_upper_limits - dof_lower_limits)
+        # self.action_scale = dof_upper_limits - dof_lower_limits
 
         # load motion
         self._motion_loader = MotionLoader(motion_file=self.cfg.motion_file, device=self.device)
@@ -102,8 +102,9 @@ class HumanoidAmpEnv(DirectRLEnv):
         )
         # TESTING SETTING
         self.test_speed: float | None = None
-        self.use_test_speed: bool = False
+        self.demo_mode: bool = False
         self.random_start_idx = torch.zeros((self.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
+        self.avg_speed = 0
 
         # # --------------------------    Gait Generator System    --------------------------#
 
@@ -111,10 +112,10 @@ class HumanoidAmpEnv(DirectRLEnv):
         """If speed is not None, all envs will use this fixed speed at reset."""
         if speed is None:
             self.test_speed = None
-            self.use_test_speed = False
+            self.demo_mode = False
         else:
             self.test_speed = float(speed)
-            self.use_test_speed = True
+            self.demo_mode = True
 
 
     def _setup_scene(self):
@@ -191,7 +192,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_weight_hip_pos = 0.5
         imitation_weight_knee_pos = 0.5
-        vel_weight = 0.5
+        vel_weight = 1.0
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
 
@@ -229,10 +230,20 @@ class HumanoidAmpEnv(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        if self.demo_mode:
+            x_pos = self.robot.data.body_pos_w[0, self.ref_body_index, 0].item()
+            step = int(self.episode_length_buf.item())
+            t = step * float(self.dt)
+
+            if step == 299:
+                self.avg_speed = x_pos / t
+                print("Average speed:", self.avg_speed)
+
         if self.cfg.early_termination:
             died = self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height
         else:
             died = torch.zeros_like(time_out)
+
         return died, time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -255,7 +266,7 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         i = 0
         for env_id in env_ids:
-            if self.use_test_speed and (self.test_speed is not None):
+            if self.demo_mode and (self.test_speed is not None):
                 self.desired_speeds[env_id] = self.test_speed
                 self.reference_speed = self.test_speed
                 random_idx = None
@@ -268,7 +279,6 @@ class HumanoidAmpEnv(DirectRLEnv):
                 self.phase_step[env_id] = 0
                 self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
                 root_state[i, 2] += 0.4
-                print("root state is increased at test speed")
 
             else:
                 self.reference_speed = np.random.uniform(0.2, 2.4)

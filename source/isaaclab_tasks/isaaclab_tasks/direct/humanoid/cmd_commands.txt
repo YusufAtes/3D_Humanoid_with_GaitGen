@@ -19,4 +19,4 @@ TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Walk-Direct-v0 --num_envs 256 --headless 
 
 TENSORBOARD:
-tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_walk\2026-01-03_14-01-02_amp_torch
+tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-01-05_11-58-19_amp_torch

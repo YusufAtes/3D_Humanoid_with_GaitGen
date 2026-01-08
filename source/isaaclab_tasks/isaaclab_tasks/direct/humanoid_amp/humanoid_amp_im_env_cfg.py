@@ -17,6 +17,10 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import PhysxCfg, SimulationCfg
 from isaaclab.utils import configclass
 
+# from .custom_terrains import slope_terrain, noisy_terrain
+# from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg
+# import isaaclab.sim as sim_utils
+
 MOTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "motions")
 
 
@@ -37,8 +41,9 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
 
     early_termination = True
     termination_height = 0.7
-
-    motion_file: str = "C:/Users/bates/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/humanoid_amp/motions/humanoid_mixed.npz"
+    
+    test_mode = None # noisy or rotation
+    motion_file: str = r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\motions\humanoid_walk.npz"
     reference_body = "torso"
     reset_strategy = "random"  # default, random, random-start
     """Strategy to be followed when resetting each environment (humanoid's pose and joint states).
@@ -74,6 +79,54 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
             ),
         },
     )
+
+    # if test_mode != None:
+    #     terrain = TerrainImporterCfg(
+    #             prim_path="/World/ground",
+    #             terrain_type="generator",
+    #             terrain_generator=TerrainGeneratorCfg(
+    #                 seed=42,
+    #                 curriculum=True, # Set False if you don't want difficulty to change
+                    
+    #                 # Map parameters: Total size of the terrain grid
+    #                 size=(20.0, 20.0), 
+    #                 border_width=2.5,
+    #                 num_rows=4,
+    #                 num_cols=4,
+    #                 horizontal_scale=0.1, # 1 pixel = 0.1 meters
+    #                 vertical_scale=0.005, # Height precision
+                    
+    #                 sub_terrains={
+    #                     # 1. SLOPED TERRAIN
+    #                     "sloped_ramp": TerrainGeneratorCfg.SubTerrainConfig(
+    #                         proportion=0.5, # 50% of the world is slopes
+    #                         function=slope_terrain,
+    #                         args={
+    #                             "slope_angle_deg": 15.0 # Max angle (at difficulty=1.0)
+    #                         }
+    #                     ),
+                        
+    #                     # 2. NOISY TERRAIN
+    #                     "noisy_ground": TerrainGeneratorCfg.SubTerrainConfig(
+    #                         proportion=0.5, # 50% of the world is noisy
+    #                         function=noisy_terrain,
+    #                         args={
+    #                             "amplitude_scale": 0.5, # Max noise height = 0.5m
+    #                             # "base_heightfield": my_numpy_array # Optional: pass specific data
+    #                         }
+    #                     )
+    #                 }
+    #             ),
+    #             max_init_terrain_level=5,
+    #             collision_group=-1,
+    #             physics_material=sim_utils.RigidBodyMaterialCfg(
+    #                 static_friction=1.0,
+    #                 dynamic_friction=1.0,
+    #                 restitution=0.0,
+    #             ),
+    #             debug_vis=False,
+    #         )
+
 
 @configclass
 class HumanoidAmpRunEnvCfg(HumanoidAmpEnvCfg):
