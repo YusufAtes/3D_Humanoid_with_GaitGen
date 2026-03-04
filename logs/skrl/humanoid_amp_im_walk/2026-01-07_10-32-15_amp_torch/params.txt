@@ -1,0 +1,4 @@
+imitation_weight_hip_pos = 0.5
+imitation_weight_knee_pos = 0.5
+vel_weight = 1.0
+mixed motion

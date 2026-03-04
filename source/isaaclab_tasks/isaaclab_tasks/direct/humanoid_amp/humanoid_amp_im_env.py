@@ -166,7 +166,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         if self.reference is not None:
 
             # physics steps since reset ≈ episode_length * decimation
-            self.phase_step = int(self.episode_length_buf + self.random_start_idx) % self.periods
+            self.phase_step = (self.episode_length_buf + self.random_start_idx) % self.periods
             self.phase = self.phase_step / self.periods
 
             obs = torch.cat(
@@ -192,12 +192,12 @@ class HumanoidAmpEnv(DirectRLEnv):
         total_reward = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
 
-        imitation_weight_hip_pos = 0.5
-        imitation_weight_knee_pos = 0.5
-        fwd_vel_weight = 0.75
-        lat_vel_weight = 0.2
-        yaw_vel_weight = 0.2
-        death_cost = -1.0
+        imitation_weight_hip_pos = 0.225
+        imitation_weight_knee_pos = 0.225
+        fwd_vel_weight = 0.35
+        lat_vel_weight = 0.1
+        yaw_vel_weight = 0.1
+        death_cost = -1.5
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
 
@@ -229,13 +229,13 @@ class HumanoidAmpEnv(DirectRLEnv):
         # Reward forward speed and penalize lateral drift and yaw drift
         vel_reward_fwd = torch.exp(-3.0 * (forward_speed - (self.desired_speeds * 2.4))**2)
         vel_reward = fwd_vel_weight * vel_reward_fwd
-        vel_reward += lat_vel_weight * torch.exp(-2.0 * torch.abs(lateral_speed))
-        vel_reward += yaw_vel_weight * torch.exp(-2.0 * torch.abs(yaw_speed))
+        vel_reward += lat_vel_weight * torch.exp(-3.0 * torch.abs(lateral_speed))
+        vel_reward += yaw_vel_weight * torch.exp(-3.0 * torch.abs(yaw_speed))
 
         total_reward = imitation_reward + vel_reward 
 
-        died = self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height
-        total_reward = torch.where(died, torch.ones_like(total_reward) * death_cost, total_reward)
+        death_penalty = (self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height).float() * death_cost
+        total_reward = total_reward + death_penalty
 
         return total_reward
 

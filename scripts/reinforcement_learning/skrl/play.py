@@ -130,7 +130,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # grab task name for checkpoint path
     task_name = args_cli.task.split(":")[-1]
     train_task_name = task_name.replace("-Play", "")
-    desired_speed= 1.1
+    desired_speed= 0.1
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
