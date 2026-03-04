@@ -14,18 +14,18 @@ a more user-friendly way.
 
 import argparse
 import sys
-
+import numpy as np
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video", action="store_true", default=True, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--task", type=str, default="Isaac-Humanoid-AMP-Imp-Path-Direct-v0", help="Name of the task.")
 parser.add_argument(
     "--agent",
     type=str,
@@ -35,7 +35,7 @@ parser.add_argument(
         "--algorithm is used to determine the default agent configuration entry point."
     ),
 )
-parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
+parser.add_argument("--checkpoint", type=str, default=r"C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\05_imitation_abs_diff_entcoeff\checkpoints\best_agent.pt", help="Path to model checkpoint.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
     "--use_pretrained_checkpoint",
@@ -130,11 +130,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # grab task name for checkpoint path
     task_name = args_cli.task.split(":")[-1]
     train_task_name = task_name.replace("-Play", "")
-    desired_speed= 0.1
+    demo_mode = "vel"
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    if demo_mode =="ramp":
+        test_slope_deg = 20.0
+        env_cfg.demo_type = "ramp"
+        env_cfg.test_slope_deg = test_slope_deg
+    elif demo_mode == "noise":
+        noise_type = "random"
+        env_cfg.demo_type = "noise"
+        env_cfg.noise_amplitude = 0.05
+        env_cfg.noise_type = noise_type
 
+    desired_speed = 1.0
     # configure the ML framework into the global skrl variable
     if args_cli.ml_framework.startswith("jax"):
         skrl.config.jax.backend = "jax" if args_cli.ml_framework == "jax" else "numpy"
@@ -172,8 +182,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     
-    env.unwrapped.set_test_speed(desired_speed)
-    # print(f"Current test speed is adjusted to : {desired_speed}")
+    # env.unwrapped.set_test_speed(desired_speed)
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
         env = multi_agent_to_single_agent(env)
@@ -186,14 +195,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     # wrap for video recording
     if args_cli.video:
-        video_kwargs = {
+        if demo_mode == "noise":
+            video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "play"),
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
-            "name_prefix": f"speed_{desired_speed}", 
-             "fps": 30,
-        }
+            "name_prefix": f"speed_{desired_speed}_{demo_mode}_{noise_type}", 
+            "fps": 30,
+            }
+        elif demo_mode == "ramp":
+            video_kwargs = {
+            "video_folder": os.path.join(log_dir, "videos", "play"),
+            "step_trigger": lambda step: step == 0,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+            "name_prefix": f"speed_{desired_speed}_{demo_mode}_{test_slope_deg}", 
+            "fps": 30,
+            }   
+        else:
+            video_kwargs = {
+            "video_folder": os.path.join(log_dir, "videos", "play"),
+            "step_trigger": lambda step: step == 0,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+            "name_prefix": f"speed_{desired_speed}_{demo_mode}", 
+            "fps": 30,
+            }
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
@@ -212,10 +240,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     runner.agent.load(resume_path)
     # set agent to evaluation mode
     runner.agent.set_running_mode("eval")
-
+    print("Setting agent to evaluation mode")
     # reset environment
     obs, _ = env.reset()
     timestep = 0
+    reward_sum = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -231,7 +260,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             else:
                 actions = outputs[-1].get("mean_actions", outputs[0])
             # env stepping
-            obs, _, _, _, _ = env.step(actions)
+            obs, rews, done, _, _ = env.step(actions)
+            demo_step = int(env.unwrapped.episode_length_buf.item()) 
+            if done:
+                print(f"Done: {done} at step: {demo_step}")
+            reward_sum += rews.sum()
+            if demo_step == 190:
+                avg_speed = env.unwrapped.avg_speed
+                print(f"Actual Speed: {avg_speed}")
+                print("--------------------------------------------------")
+
         if args_cli.video:
             timestep += 1
             # exit the play loop after recording one video
@@ -242,7 +280,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
-
+    print(f"Total reward sum: {reward_sum}")
     # close the simulator
     env.close()
 
@@ -251,4 +289,6 @@ if __name__ == "__main__":
     # run the main function
     main()
     # close sim app
+    print("Closing simulation app")
     simulation_app.close()
+    print("Simulation app closed")

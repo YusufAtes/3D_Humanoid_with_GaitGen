@@ -13,10 +13,12 @@ from isaacsim.core.utils.torch.rotations import compute_heading_and_up, compute_
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
+from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
 from .gait_generator_net import SimpleFCNN
 import numpy as np
 from scipy.signal import resample
+from pxr import UsdGeom, Gf
 
 def normalize_angle(x):
     return torch.atan2(torch.sin(x), torch.cos(x))
@@ -72,6 +74,18 @@ class LocomotionEnv(DirectRLEnv):
         self.use_test_speed: bool = False
         self.random_start_idx = torch.zeros((self.cfg.terrain.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
         self.desired_speeds = torch.zeros((self.cfg.terrain.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
+        
+        # Demo mode settings
+        self.demo_mode = getattr(self.cfg, 'demo_mode', False)
+        if self.demo_mode:
+            self.demo_type = getattr(self.cfg, 'demo_type', None)
+        else:
+            self.demo_type = None
+        self.test_slope_deg = getattr(self.cfg, 'test_slope_deg', 0.0)
+        self.ramp_demo = False
+        if self.test_slope_deg != 0:
+            self.ramp_demo = True
+        self.avg_speed = 0
 
         # # --------------------------    Gait Generator System    --------------------------#
 
@@ -86,15 +100,92 @@ class LocomotionEnv(DirectRLEnv):
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
-        # add ground plane
-        self.cfg.terrain.num_envs = self.scene.cfg.num_envs
-        self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
-        self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+
+        if self.cfg.demo_mode and self.cfg.demo_type == "noise" and self.cfg.noise_amplitude > 0.0:
+            from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg, HfWaveTerrainCfg
+            from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
+            # Create noisy terrain generator config
+            amp = self.cfg.noise_amplitude
+            noise_seed = self.cfg.noise_seed
+            noise_type = self.cfg.noise_type
+            
+            if noise_type == "wave":
+                sub_terrains = {
+                    "wave_terrain": HfWaveTerrainCfg(
+                        proportion=1.0,
+                        amplitude_range=(amp, amp),
+                        num_waves=4,
+                        border_width=0.25,
+                    ),
+                }
+            else:  # "random" (default)
+                sub_terrains = {
+                    "random_rough": HfRandomUniformTerrainCfg(
+                        proportion=1.0,
+                        noise_range=(-amp, amp),
+                        noise_step=0.005,
+                        border_width=0.25,
+                    ),
+                }
+            
+            # Create terrain generator config
+            noisy_terrain_cfg = TerrainGeneratorCfg(
+                seed=noise_seed,
+                size=(20.0, 20.0),
+                border_width=0.0,
+                num_rows=1,
+                num_cols=1,
+                horizontal_scale=0.1,
+                vertical_scale=0.005,
+                slope_threshold=0.75,
+                use_cache=False,
+                color_scheme="height",
+                sub_terrains=sub_terrains,
+            )
+            
+            # Update terrain config to use generator
+            self.cfg.terrain.terrain_type = "generator"
+            self.cfg.terrain.terrain_generator = noisy_terrain_cfg
+            self.cfg.terrain.num_envs = self.scene.cfg.num_envs
+            self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
+            self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        else:
+            # For ramp demo or regular mode, use ground plane or configured terrain
+            if self.cfg.demo_mode and self.cfg.demo_type == "ramp":
+                # For ramp demo, always use ground plane
+                spawn_ground_plane(
+                    prim_path="/World/ground",
+                    cfg=GroundPlaneCfg(
+                        physics_material=sim_utils.RigidBodyMaterialCfg(
+                            static_friction=1.0,
+                            dynamic_friction=1.0,
+                            restitution=0.0,
+                        ),
+                    ),
+                )
+                # Apply ramp rotation
+                slope = float(self.test_slope_deg)
+                if slope != 0.0:
+                    stage = self.sim.stage
+                    prim = stage.GetPrimAtPath("/World/ground")
+                    if prim.IsValid():
+                        xform = UsdGeom.Xformable(prim)
+                        xform.ClearXformOpOrder()
+                        rot_op = xform.AddRotateXYZOp()
+                        # Rotate around Y axis for slope
+                        rot_op.Set(Gf.Vec3f(0.0, slope, 0.0))
+            else:
+                # Use configured terrain (plane or generator)
+                self.cfg.terrain.num_envs = self.scene.cfg.num_envs
+                self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
+                self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         # we need to explicitly filter collisions for CPU simulation
         if self.device == "cpu":
-            self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
+            terrain_prim_path = getattr(self.cfg.terrain, 'prim_path', "/World/ground")
+            self.scene.filter_collisions(global_prim_paths=[terrain_prim_path])
         # add articulation to scene
         self.scene.articulations["robot"] = self.robot
         # add lights
@@ -217,7 +308,53 @@ class LocomotionEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         self._compute_intermediate_values()
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        died = self.torso_position[:, 2] < self.cfg.termination_height
+
+        # --------------------------------------------------------
+        # DEMO MODE METRICS
+        # --------------------------------------------------------
+        if self.demo_mode:
+            x_pos = self.torso_position[0, 0].item()
+            step = int(self.episode_length_buf.item())
+            t = step * float(self.dt)
+            self.current_t = t
+            if step <= 30:
+                self.start_t = t
+                self.start_x_pos = x_pos
+            else:
+                self.avg_speed = (x_pos - self.start_x_pos) / (t - self.start_t)
+
+        # --------------------------------------------------------
+        # TERMINATION LOGIC (RAMP AWARE)
+        # --------------------------------------------------------
+        if getattr(self.cfg, 'early_termination', True):
+            # 1. Get Robot Root positions
+            root_y = self.torso_position[:, 0] 
+            root_z = self.torso_position[:, 2]
+
+            # 2. Calculate Slope Angle in Radians
+            # We create a tensor on the same device to ensure GPU compatibility
+            slope_deg = torch.tensor(self.cfg.test_slope_deg, device=self.device)
+            slope_rad = torch.deg2rad(slope_deg)
+
+            # 3. Calculate Floor Z at the current Y position
+            # Formula: z_floor = y * tan(theta)
+            floor_z = root_y * torch.tan(-slope_rad)
+            # 4. Calculate Relative Height
+            # This is the height of the robot ABOVE the calculated inclined floor
+            relative_height = root_z - floor_z
+            # 5. Check Termination
+            died = relative_height < self.cfg.termination_height
+            
+            # Handle Demo Mode Stats if died
+            if self.cfg.demo_mode and died.any():
+                x_pos = self.torso_position[0, 0].item()
+                step = int(self.episode_length_buf.item())
+                t = step * float(self.dt)
+                if t > 0:
+                    self.avg_speed = x_pos / t
+        else:
+            died = self.torso_position[:, 2] < self.cfg.termination_height
+
         return died, time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -234,25 +371,48 @@ class LocomotionEnv(DirectRLEnv):
         # # --------------------------    Gait Generator System    --------------------------#
         i = 0
         for env_id in env_ids:
-            if self.use_test_speed and (self.test_speed is not None):
+            if self.demo_mode and (self.test_speed is not None):
+                self.episode_length_buf[env_ids] = 0
+                self.desired_speeds[env_id] = self.test_speed / 2.4
+                self.reference_speed = self.test_speed / 2.4
+                random_idx = None
+                encoder_vec = torch.empty((3),device=self.sim.device)   
+                encoder_vec[0] = self.reference_speed
+                encoder_vec[1] = self.leg_len /1.0
+                encoder_vec[2] = self.leg_len /1.0
+
+                self.reference[env_id,:] = self.findgait(encoder_vec) 
+                self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the hip angle
+                self.reference[env_id,[1,3]]  = torch.clamp(self.reference[env_id,[1,3]] , -np.pi, 0)     #Clip the knee angle
+                
+            elif self.demo_mode and (self.test_speed is None):
+                raise ValueError("NO TEST SPEED IS DEFINED!!!!!")
+                
+            elif self.use_test_speed and (self.test_speed is not None):
                 self.reference_speed = self.test_speed
                 random_idx = None
+                encoder_vec = torch.empty((3),device=self.sim.device)   
+                encoder_vec[0] = self.reference_speed/2.4
+                encoder_vec[1] = self.leg_len /1.0
+                encoder_vec[2] = self.leg_len /1.0
+
+                self.reference[env_id,:] = self.findgait(encoder_vec)                     #Find the gait
+                self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
+                self.desired_speeds[env_id] = self.reference_speed
             else:
                 self.reference_speed = np.random.uniform(0.2, 2.4)
                 random_idx = np.random.randint(0,int(1/self.dt))
-            encoder_vec = torch.empty((3),device=self.sim.device)   
+                encoder_vec = torch.empty((3),device=self.sim.device)   
 
-            encoder_vec[0] = self.reference_speed/2.4
-            encoder_vec[1] = self.leg_len /1.0
-            encoder_vec[2] = self.leg_len /1.0
+                encoder_vec[0] = self.reference_speed/2.4
+                encoder_vec[1] = self.leg_len /1.0
+                encoder_vec[2] = self.leg_len /1.0
 
-            self.reference[env_id,:] = self.findgait(encoder_vec)                     #Find the gait
-            self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
-            # self.reference[:,2] = -self.reference[:,2]
-            # self.reference[:,5] = -self.reference[:,5]
-            self.desired_speeds[env_id] = self.reference_speed
+                self.reference[env_id,:] = self.findgait(encoder_vec)                     #Find the gait
+                self.reference[env_id,:]  = torch.clamp(self.reference[env_id,:] , -np.pi/2, np.pi/2)     #Clip the gait
+                self.desired_speeds[env_id] = self.reference_speed
             
-            if random_idx:
+            if random_idx is not None:
                 self.random_start_idx[env_id] = random_idx
 
                 rhip_pos = self.reference[env_id,random_idx,0]
@@ -279,6 +439,8 @@ class LocomotionEnv(DirectRLEnv):
                 i+=1
                 
                 # -------------------- RSI ON -----------------------------#
+            else:
+                i+=1
 
         # # --------------------------    Gait Generator System    --------------------------#
 
@@ -415,10 +577,10 @@ def compute_rewards(
     # ----------------- Gait Generator imitation ----------------- #
 
     imitation_reward = torch.zeros_like(heading_reward)
-    imitation_weight_hip_pos = 1.5
-    imitation_weight_knee_pos = 1.5
+    imitation_weight_hip_pos = 0.75
+    imitation_weight_knee_pos = 0.75
     imitation_weight_ankle_pos = 0.25
-    vel_weight = 2.0
+    vel_weight = 1.5
 
     # hips
     hip_joint_pos = dof_pos[:, [10, 13]]          # [N, 2]
@@ -436,7 +598,7 @@ def compute_rewards(
     imitation_reward = imitation_reward + \
         imitation_weight_knee_pos * torch.exp(-5.0 * knee_dist)
 
-    vel_error = torch.norm(vel_loc[:, 0] - desired_speeds)
+    vel_error = torch.abs(vel_loc[:, 0] - desired_speeds)
     vel_reward = torch.exp(-2.0 * vel_error) * vel_weight
     # ----------------- Gait Generator imitation ----------------- #
 

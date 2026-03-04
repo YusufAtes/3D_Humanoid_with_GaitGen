@@ -87,12 +87,12 @@ agent:
   ratio_clip: 0.2
   value_clip: 0.2
   clip_predicted_values: True
-  entropy_loss_scale: 0.0
+  entropy_loss_scale: 3.0e-04
   value_loss_scale: 2.5
   discriminator_loss_scale: 5.0
   amp_batch_size: 512
-  task_reward_weight: 0.65
-  style_reward_weight: 0.35
+  task_reward_weight: 0.8
+  style_reward_weight: 0.6
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05

@@ -25,6 +25,16 @@ gym.register(
     },
 )
 
+gym.register(
+    id="Isaac-Humanoid-AMP-Imp-Path-Direct-v0",
+    entry_point=f"{__name__}.humanoid_amp_im_path_env:HumanoidAmpEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.humanoid_amp_im_env_path_cfg:HumanoidAmpEnvCfg",
+        "skrl_amp_cfg_entry_point": f"{agents.__name__}:skrl_walk_amp_im_path_cfg.yaml",
+    },
+)
+
 # gym.register(
 #     id="Isaac-Humanoid-AMP-Dance-Direct-v0",
 #     entry_point=f"{__name__}.humanoid_amp_env:HumanoidAmpEnv",

@@ -14,10 +14,39 @@ from isaaclab.envs.common import ViewerCfg   # <-- add this
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
+from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg, HfWaveTerrainCfg
 from isaaclab.utils import configclass
 
 
 from isaaclab_tasks.direct.locomotion.locomotion_env import LocomotionEnv
+
+
+# ---------------------------------------------------------------------------
+# Noisy terrain generator — only random rough sub-terrain, 20 m × 20 m
+# noise_range is a placeholder; it is overridden from noise_amplitude in
+# _setup_scene before the TerrainImporter is instantiated.
+# ---------------------------------------------------------------------------
+NOISY_TERRAIN_CFG = TerrainGeneratorCfg(
+    seed=42,
+    size=(20.0, 20.0),
+    border_width=0.0,
+    num_rows=1,
+    num_cols=1,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    color_scheme="height",
+    sub_terrains={
+        "random_rough": HfRandomUniformTerrainCfg(
+            proportion=1.0,
+            noise_range=(-0.05, 0.05),  # overridden by noise_amplitude at runtime
+            noise_step=0.005,
+            border_width=0.25,
+        ),
+    },
+)
 
 
 @configclass
@@ -32,7 +61,20 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
 
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
-    terrain = TerrainImporterCfg(
+    
+    # Demo mode settings
+    demo_mode: bool = True
+    demo_type: str = "vel"   # Possible choices are vel, ramp, and noise
+    test_slope_deg: float = 0.0
+    
+    # Noisy plane demo settings
+    noise_amplitude: float = 0.05  # Max height perturbation (meters) for noisy plane demo
+    noise_seed: int = 42           # Seed for reproducible noise pattern across trials
+    noise_type: str = "random"     # "random" or "wave"
+    
+    # Terrain configuration
+    # When demo_type == "noise", terrain_type will be set to "generator" in _setup_scene
+    terrain: TerrainImporterCfg = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",
         collision_group=-1,
@@ -45,6 +87,8 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
         ),
         debug_vis=False,
     )
+    
+    early_termination: bool = True
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -94,7 +138,7 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
     dof_vel_scale: float = 0.1
 
     death_cost: float = -100.0
-    termination_height: float = 0.9
+    termination_height: float = 0.6
 
     angular_velocity_scale: float = 0.25
     contact_force_scale: float = 0.01

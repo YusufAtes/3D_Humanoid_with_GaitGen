@@ -1,23 +1,133 @@
-HUMANOID NO AMP
+
+                        ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --task Isaac-Humanoid-Direct-v0 --num_envs 1 --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_direct\2025-12-22_08-59-16_ppo_torch\checkpoints\best_agent.pt --headless --video --video_length 400
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-02-26_10-57-56_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-Direct-v0 --num_envs 256 --headless 
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 512 --headless 
+
+TENSORBOARD:
+tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Velocity Comparison Demo Code:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-02-23_12-01-04_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Ramp Angle Demo Code (single angle):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\ramp_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\2026-02-14_20-31-24_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --test_angle 5.0 --headless
+
+Ramp Angle Demo Code (sweep -12 to +12 degrees):
+scripts\reinforcement_learning\skrl\run_ramp_angle_demo.bat
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Noisy Plane Demo Code (single amplitude):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\noisy_plane_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\06_imitation_abs_diff\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --noise_amplitude 0.05 --headless
+
+Noisy Plane Demo Code (sweep 0.01 to 0.15 m):
+scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+                        ====================================    HUMANOID PATH INCLUDED AMP CODES  ====================================
+
+TEST:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\try2\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 100
+
+TRAIN:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless 
+
+TRAIN (SECOND TRAINING):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-02-25_13-40-32_amp_torch\checkpoints\best_agent.pt
+
+TENSORBOARD:
+tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path --host 127.0.0.1
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Velocity Comparison Demo Code:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-02-23_12-01-04_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Ramp Angle Demo Code (single angle):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\ramp_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\2026-02-14_20-31-24_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --test_angle 5.0 --headless
+
+Ramp Angle Demo Code (sweep -12 to +12 degrees):
+scripts\reinforcement_learning\skrl\run_ramp_angle_demo.bat
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Noisy Plane Demo Code (single amplitude):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\noisy_plane_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\06_imitation_abs_diff\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --noise_amplitude 0.05 --headless
+
+Noisy Plane Demo Code (sweep 0.01 to 0.15 m):
+scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+                        ====================================    HUMANOID NO AMP CODES  ====================================
+
+TEST:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --task Isaac-Humanoid-Direct-v0 --num_envs 1 --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_direct/2026-02-18_10-25-04_ppo_torch/checkpoints/best_agent.pt --headless --video --video_length 300  --algorithm PPO
+
+TRAIN:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-Direct-v0 --num_envs 256 --algorithm PPO --headless 
 
 Tensorboard Reward Logger
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_direct\2025-12-22_08-59-16_ppo_torch
 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-HUMANOID AMP
+Velocity Comparison Demo Code:
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:/Users/bates/IsaacLab/logs/skrl/humanoid_direct/2026-02-18_10-25-04_ppo_torch/checkpoints/best_agent.pt --task Isaac-Humanoid-Direct-v0 --num_envs 1 --algorithm PPO --headless
 
-TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-01-08_15-52-19_amp_torch\checkpoints\agent_1000000.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-TRAIN:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 256 --headless 
+Ramp Angle Demo Code (single angle):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\ramp_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\2026-02-14_20-31-24_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-Direct-v0 --num_envs 1 --algorithm PPO --test_angle 5.0 --headless
 
-TENSORBOARD:
-tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-01-08_15-52-19_amp_torch --port 6006 --host 127.0.0.1
+Ramp Angle Demo Code (sweep -12 to +12 degrees):
+scripts\reinforcement_learning\skrl\run_ramp_angle_demo.bat
 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Noisy Plane Demo Code (single amplitude):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\noisy_plane_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_old\06_imitation_abs_diff\checkpoints\best_agent.pt --task Isaac-Humanoid-Direct-v0 --num_envs 1 --algorithm PPO --noise_amplitude 0.05 --headless
+
+Noisy Plane Demo Code (sweep 0.01 to 0.15 m):
+scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

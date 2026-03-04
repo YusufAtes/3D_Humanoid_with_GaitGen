@@ -1,4 +1,0 @@
-imitation_weight_hip_pos = 0.75
-imitation_weight_knee_pos = 0.75
-vel_weight = 0.75
-motion mixed
