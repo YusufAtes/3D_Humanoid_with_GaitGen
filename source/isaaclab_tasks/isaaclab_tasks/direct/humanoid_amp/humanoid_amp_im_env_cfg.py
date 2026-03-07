@@ -60,7 +60,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     decimation = 2
 
     # spaces
-    observation_space = 83
+    observation_space = 84
     action_space = 28
     state_space = 0
     num_amp_observations = 2
@@ -70,7 +70,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     termination_height = 0.7
     
     # NEW: Added this field to control slope at spawn time
-    demo_mode: bool= False
+    demo_mode: bool= True
     demo_type: str= "vel"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
 

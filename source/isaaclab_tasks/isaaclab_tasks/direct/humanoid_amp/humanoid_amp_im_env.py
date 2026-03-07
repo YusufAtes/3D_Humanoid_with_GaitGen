@@ -21,7 +21,7 @@ from .humanoid_amp_im_env_cfg import HumanoidAmpEnvCfg
 from .motions import MotionLoader
 from .gait_generator_net import SimpleFCNN
 from scipy.signal import resample
-
+import time
 
 class HumanoidAmpEnv(DirectRLEnv):
     cfg: HumanoidAmpEnvCfg
@@ -92,13 +92,20 @@ class HumanoidAmpEnv(DirectRLEnv):
             dtype=torch.int,
         )
 
-        self.desired_speeds = torch.zeros(
+        self.desired_fwd_speeds = torch.zeros(
             (self.num_envs,),
             device=self.sim.device,
             dtype=torch.float32,
         )
+
+        self.desired_ang_speeds = torch.zeros(
+            (self.num_envs,),
+            device=self.sim.device,
+            dtype=torch.float32,
+        )
+
         # TESTING SETTING
-        self.test_speed: float | None = None
+        self.test_fwd_speed: float | None = None
         self.demo_mode= self.cfg.demo_mode
         if self.demo_mode:
             self.demo_type = self.cfg.demo_type
@@ -111,12 +118,16 @@ class HumanoidAmpEnv(DirectRLEnv):
         if self.test_slope_deg != 0:
             self.ramp_demo = True
 
-    def set_test_speed(self, speed: float | None):
+    def set_test_speed(self, fwd_speed: float | None):
         """If speed is not None, all envs will use this fixed speed at reset."""
-        if speed is None:
-            self.test_speed = None
+        if fwd_speed is None:
+            self.test_fwd_speed = None
         else:
-            self.test_speed = float(speed)
+            self.test_fwd_speed = float(fwd_speed)
+        # if ang_speed is None:
+        #     self.test_ang_speed = None
+        # else:
+        #     self.test_ang_speed = float(ang_speed)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -209,7 +220,8 @@ class HumanoidAmpEnv(DirectRLEnv):
                 (
                     obs,
                     self.phase.unsqueeze(1),
-                    self.desired_speeds.unsqueeze(1)
+                    self.desired_fwd_speeds.unsqueeze(1),
+                    torch.zeros((self.num_envs,1), device=self.sim.device, dtype=torch.float32)
                 ),
                 dim=-1
                 )
@@ -225,15 +237,14 @@ class HumanoidAmpEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         total_reward = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
-        imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
-        imitation_coeff = torch.where(self.desired_speeds > 0.5, imitation_coeff * torch.exp( -1.5 *  (self.desired_speeds - 0.5)), imitation_coeff)
+        # imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
+        # imitation_coeff = torch.where(self.desired_fwd_speeds > 0.5, imitation_coeff * torch.exp( -1.5 *  (self.desired_fwd_speeds - 0.5)), imitation_coeff)
 
-        imitation_weight_hip_pos  = 0.35 * imitation_coeff
-        imitation_weight_knee_pos = 0.35 * imitation_coeff
+        imitation_weight_hip_pos  = 0.35 #* imitation_coeff
+        imitation_weight_knee_pos = 0.35 #* imitation_coeff
 
-        fwd_vel_weight = 0.7  * (1 /imitation_coeff)
+        fwd_vel_weight = 0.75             #* (1 /imitation_coeff)
         lat_vel_weight = 0.15
-        yaw_vel_weight = 0.15
 
         death_cost = -1.5
 
@@ -246,14 +257,14 @@ class HumanoidAmpEnv(DirectRLEnv):
         hip_ref_pos = current_ref_pos[:,[0,2]]
         hip_diff      = hip_joint_pos - hip_ref_pos          # [N, 2]
         hip_dist      = torch.norm(hip_diff, p=2, dim=-1)    # [N]
-        imitation_reward = imitation_reward + imitation_weight_hip_pos * torch.exp(-5.0 * hip_dist)
+        imitation_reward = imitation_reward + imitation_weight_hip_pos * torch.exp(-3.0 * hip_dist)
 
         # knees
         knee_joint_pos = self.robot.data.joint_pos[:, [20, 21]]         # [N, 2]
         knee_ref_pos   = current_ref_pos[:,[1,3]]
         knee_diff      = knee_joint_pos - knee_ref_pos
         knee_dist      = torch.norm(knee_diff, p=2, dim=-1)
-        imitation_reward = imitation_reward + imitation_weight_knee_pos * torch.exp(-5.0 * knee_dist)
+        imitation_reward = imitation_reward + imitation_weight_knee_pos * torch.exp(-3.0 * knee_dist)
 
         # Body velocity
         vel_b = self.robot.data.root_com_lin_vel_b  # [N, 3]
@@ -264,16 +275,19 @@ class HumanoidAmpEnv(DirectRLEnv):
         lateral_speed  = vel_b[:, 1]   # sideways (y)
         yaw_speed = vel_ang[:, 2]   # yaw (w)
 
-        vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_speeds * 2.4)))
+        vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
         vel_reward = fwd_vel_weight * vel_reward_fwd
-        vel_reward += lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
-        vel_reward += yaw_vel_weight * torch.exp(-4.0 * torch.abs(yaw_speed))
+
+        # vel_reward_ang = torch.exp(-5.0 * torch.abs(yaw_speed - (self.desired_ang_speeds)))
+        # vel_reward += yaw_vel_weight * vel_reward_ang
+
+        lat_vel_reward = lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
+        vel_reward += lat_vel_reward
 
         total_reward = imitation_reward + vel_reward 
 
         death_penalty = (self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height).float() * death_cost
         total_reward = total_reward + death_penalty
-
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -342,13 +356,19 @@ class HumanoidAmpEnv(DirectRLEnv):
         i = 0
         for env_id in env_ids:
 
-            if self.demo_mode and (self.test_speed is not None):
+            if self.demo_mode and (self.test_fwd_speed is not None):
                 self.episode_length_buf[env_ids] = 0
-                self.desired_speeds[env_id] = self.test_speed / 2.4
-                self.reference_speed = self.test_speed / 2.4
+                self.desired_fwd_speeds[env_id] = self.test_fwd_speed / 2.4
+
+                # if self.test_ang_speed is not None:
+                #     self.desired_ang_speeds[env_id] = self.test_ang_speed
+                # else:
+                #     self.desired_ang_speeds[env_id] = 0.0
+
+                self.reference_fwd_speed = self.test_fwd_speed / 2.4
                 random_idx = None
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed
+                encoder_vec[0] = self.reference_fwd_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
@@ -359,16 +379,18 @@ class HumanoidAmpEnv(DirectRLEnv):
                 self.reference[env_id,[1,3]]  = torch.clamp(self.reference[env_id,[1,3]] , -np.pi, 0)     
                 root_state[i, 2] += 0.4
 
-            elif self.demo_mode and (self.test_speed is None):
+            elif self.demo_mode and (self.test_fwd_speed is None):
                 raise ValueError("NO TEST SPEED IS DEFINED!!!!!")
 
             else:
-                self.reference_speed = np.random.uniform(0.1, 2.4) / 2.4
+                self.reference_fwd_speed = np.random.uniform(0.1, 2.4) / 2.4
+                self.reference_ang_speed = np.random.normal(0.0, 0.5)
                 random_idx = np.random.randint(0,int(3/self.dt))
-                self.desired_speeds[env_id] = self.reference_speed 
+                self.desired_fwd_speeds[env_id] = self.reference_fwd_speed 
+                self.desired_ang_speeds[env_id] = self.reference_ang_speed
                 
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed
+                encoder_vec[0] = self.reference_fwd_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
@@ -512,7 +534,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         return pred_time
     
     def find_closest_index(self,reference,period):
-        if self.demo_mode and (self.test_speed is not None):
+        if self.demo_mode and (self.test_fwd_speed is not None):
             distances = torch.abs(reference[:period,:]).sum(dim=-1)
             closest_index = torch.argmin(distances)
             active_phase_step = closest_index.item()
