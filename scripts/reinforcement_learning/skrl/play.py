@@ -144,7 +144,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         env_cfg.noise_amplitude = 0.05
         env_cfg.noise_type = noise_type
 
-    desired_speed = 1.0
+    desired_speed = 1.2
+    desired_heading = -1.0
     # configure the ML framework into the global skrl variable
     if args_cli.ml_framework.startswith("jax"):
         skrl.config.jax.backend = "jax" if args_cli.ml_framework == "jax" else "numpy"
@@ -182,7 +183,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     
-    # env.unwrapped.set_test_speed(desired_speed)
+    env.unwrapped.set_test_speed(desired_speed)
+    env.unwrapped.set_test_heading(desired_heading)
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
         env = multi_agent_to_single_agent(env)
@@ -219,7 +221,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
-            "name_prefix": f"speed_{desired_speed}_{demo_mode}", 
+            "name_prefix": f"speed_{desired_speed}_heading_{desired_heading}_{demo_mode}", 
             "fps": 30,
             }
         print("[INFO] Recording videos during training.")

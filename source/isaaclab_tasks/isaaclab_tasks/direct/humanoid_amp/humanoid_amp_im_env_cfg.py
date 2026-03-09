@@ -70,10 +70,11 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     termination_height = 0.7
     
     # NEW: Added this field to control slope at spawn time
-    demo_mode: bool= True
+    demo_mode: bool= False
     demo_type: str= "vel"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
 
+    second_training: bool = True
     # Noisy plane demo settings
     noise_amplitude: float = 0.05  # Max height perturbation (meters) for noisy plane demo
     noise_seed: int = 42           # Seed for reproducible noise pattern across trials

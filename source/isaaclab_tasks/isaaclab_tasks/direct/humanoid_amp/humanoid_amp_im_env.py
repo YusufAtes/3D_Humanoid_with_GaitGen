@@ -98,7 +98,13 @@ class HumanoidAmpEnv(DirectRLEnv):
             dtype=torch.float32,
         )
 
-        self.desired_ang_speeds = torch.zeros(
+        self.desired_headings = torch.zeros(
+            (self.num_envs,),
+            device=self.sim.device,
+            dtype=torch.float32,
+        )
+
+        self.robot_yaw = torch.zeros(
             (self.num_envs,),
             device=self.sim.device,
             dtype=torch.float32,
@@ -124,10 +130,13 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.test_fwd_speed = None
         else:
             self.test_fwd_speed = float(fwd_speed)
-        # if ang_speed is None:
-        #     self.test_ang_speed = None
-        # else:
-        #     self.test_ang_speed = float(ang_speed)
+
+    def set_test_heading(self, fwd_heading: float | None):
+        """If speed is not None, all envs will use this fixed speed at reset."""
+        if fwd_heading is None:
+            self.test_heading = None
+        else:
+            self.test_heading = float(fwd_heading)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -210,21 +219,34 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.robot.data.body_ang_vel_w[:, self.ref_body_index],
             self.robot.data.body_pos_w[:, self.key_body_indexes],
         )
-
+        torso_quat = self.robot.data.body_quat_w[:, self.ref_body_index] 
+        self.robot_yaw  = self._quat_to_yaw(torso_quat)
         # # --------------------------    Gait Generator System    --------------------------#
         if self.reference is not None:
             self.phase_step = (self.episode_length_buf + self.random_start_idx) % self.periods
             self.phase = self.phase_step / self.periods
 
-            obs = torch.cat(
-                (
-                    obs,
-                    self.phase.unsqueeze(1),
-                    self.desired_fwd_speeds.unsqueeze(1),
-                    torch.zeros((self.num_envs,1), device=self.sim.device, dtype=torch.float32)
-                ),
-                dim=-1
+            if self.cfg.second_training:
+                obs = torch.cat(
+                    (
+                        obs,
+                        self.phase.unsqueeze(1),
+                        self.desired_fwd_speeds.unsqueeze(1),
+                        self.desired_headings.unsqueeze(1)
+                    ),
+                    dim=-1
                 )
+
+            else:
+                obs = torch.cat(
+                    (
+                        obs,
+                        self.phase.unsqueeze(1),
+                        self.desired_fwd_speeds.unsqueeze(1),
+                        torch.zeros((self.num_envs,1), device=self.sim.device, dtype=torch.float32)
+                    ),
+                    dim=-1
+                    )
         # # --------------------------    Gait Generator System    --------------------------#
 
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
@@ -240,13 +262,24 @@ class HumanoidAmpEnv(DirectRLEnv):
         # imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         # imitation_coeff = torch.where(self.desired_fwd_speeds > 0.5, imitation_coeff * torch.exp( -1.5 *  (self.desired_fwd_speeds - 0.5)), imitation_coeff)
 
-        imitation_weight_hip_pos  = 0.35 #* imitation_coeff
-        imitation_weight_knee_pos = 0.35 #* imitation_coeff
+        if self.cfg.second_training:
 
-        fwd_vel_weight = 0.75             #* (1 /imitation_coeff)
-        lat_vel_weight = 0.15
+            imitation_weight_hip_pos  = 0.05 #* imitation_coeff
+            imitation_weight_knee_pos = 0.05 #* imitation_coeff
 
-        death_cost = -1.5
+            fwd_vel_weight = 0.75             #* (1 /imitation_coeff)
+            lat_vel_weight = 0.05
+            heading_weight = 0.75
+            death_cost = -1.5
+        else:
+            imitation_weight_hip_pos  = 0.35 #* imitation_coeff
+            imitation_weight_knee_pos = 0.35 #* imitation_coeff
+
+            fwd_vel_weight = 0.75             #* (1 /imitation_coeff)
+            lat_vel_weight = 0.15
+
+            heading_weight = 0.0
+            death_cost = -1.5
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
 
@@ -277,6 +310,9 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
         vel_reward = fwd_vel_weight * vel_reward_fwd
+
+        heading_reward = heading_weight * torch.exp(-2.5 * torch.abs(self._wrap_angle(self.robot_yaw - self.desired_headings)))
+        total_reward = total_reward + heading_reward
 
         # vel_reward_ang = torch.exp(-5.0 * torch.abs(yaw_speed - (self.desired_ang_speeds)))
         # vel_reward += yaw_vel_weight * vel_reward_ang
@@ -360,10 +396,11 @@ class HumanoidAmpEnv(DirectRLEnv):
                 self.episode_length_buf[env_ids] = 0
                 self.desired_fwd_speeds[env_id] = self.test_fwd_speed / 2.4
 
-                # if self.test_ang_speed is not None:
-                #     self.desired_ang_speeds[env_id] = self.test_ang_speed
-                # else:
-                #     self.desired_ang_speeds[env_id] = 0.0
+                if self.test_heading is not None:
+                    self.desired_headings[env_id] = self.test_heading
+                    print(f"Heading is set to: {self.test_heading}")
+                else:
+                    self.desired_headings[env_id] = 0 
 
                 self.reference_fwd_speed = self.test_fwd_speed / 2.4
                 random_idx = None
@@ -384,10 +421,12 @@ class HumanoidAmpEnv(DirectRLEnv):
 
             else:
                 self.reference_fwd_speed = np.random.uniform(0.1, 2.4) / 2.4
-                self.reference_ang_speed = np.random.normal(0.0, 0.5)
+                self.reference_heading = np.random.normal(0.0, 0.5)
+
                 random_idx = np.random.randint(0,int(3/self.dt))
+
                 self.desired_fwd_speeds[env_id] = self.reference_fwd_speed 
-                self.desired_ang_speeds[env_id] = self.reference_ang_speed
+                self.desired_headings[env_id] = self.reference_heading
                 
                 encoder_vec = torch.empty((3),device=self.sim.device)   
                 encoder_vec[0] = self.reference_fwd_speed
@@ -465,6 +504,28 @@ class HumanoidAmpEnv(DirectRLEnv):
         self.amp_observation_buffer[env_ids] = amp_observations.view(num_samples, self.cfg.num_amp_observations, -1)
 
         return root_state, dof_pos, dof_vel
+
+    @staticmethod
+    def _quat_to_yaw(quat_wxyz: torch.Tensor) -> torch.Tensor:
+        """
+        Extract yaw (rotation around world Z) from quaternion.
+        IsaacLab body_quat_w uses (w, x, y, z) ordering.
+        Returns shape [N].
+        """
+        w = quat_wxyz[:, 0]
+        x = quat_wxyz[:, 1]
+        y = quat_wxyz[:, 2]
+        z = quat_wxyz[:, 3]
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return torch.atan2(siny_cosp, cosy_cosp)          # [-π, π]
+
+    # ──────────────────────────────────────────────────────────────────────
+    # HELPER: wrap angle to [-π, π]
+    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _wrap_angle(angle: torch.Tensor) -> torch.Tensor:
+        return torch.atan2(torch.sin(angle), torch.cos(angle))
 
     def collect_reference_motions(self, num_samples: int, current_times: np.ndarray | None = None) -> torch.Tensor:
         if current_times is None:

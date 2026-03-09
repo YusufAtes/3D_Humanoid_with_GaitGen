@@ -2,10 +2,14 @@
                         ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-02-26_10-57-56_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-08_16-07-38_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 512 --headless 
+
+TRAIN (SECOND TRAINING):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 512 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-06_23-53-26_amp_torch\checkpoints\best_agent.pt
+
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk
@@ -14,7 +18,7 @@ tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Velocity Comparison Demo Code:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-02-23_12-01-04_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-06_23-53-26_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
