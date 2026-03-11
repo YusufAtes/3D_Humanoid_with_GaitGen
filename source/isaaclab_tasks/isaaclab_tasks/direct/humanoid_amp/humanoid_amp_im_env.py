@@ -267,7 +267,7 @@ class HumanoidAmpEnv(DirectRLEnv):
             imitation_weight_hip_pos  = 0.05 #* imitation_coeff
             imitation_weight_knee_pos = 0.05 #* imitation_coeff
 
-            fwd_vel_weight = 0.75             #* (1 /imitation_coeff)
+            fwd_vel_weight = 0.25             #* (1 /imitation_coeff)
             lat_vel_weight = 0.05
             heading_weight = 0.75
             death_cost = -1.5

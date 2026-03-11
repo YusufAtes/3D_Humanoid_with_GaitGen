@@ -145,7 +145,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         env_cfg.noise_type = noise_type
 
     desired_speed = 1.2
-    desired_heading = -1.0
+    desired_heading = 1.0
     # configure the ML framework into the global skrl variable
     if args_cli.ml_framework.startswith("jax"):
         skrl.config.jax.backend = "jax" if args_cli.ml_framework == "jax" else "numpy"

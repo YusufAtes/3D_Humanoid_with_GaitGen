@@ -2,7 +2,7 @@
                         ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-08_16-07-38_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-10_06-55-38_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 512 --headless 
