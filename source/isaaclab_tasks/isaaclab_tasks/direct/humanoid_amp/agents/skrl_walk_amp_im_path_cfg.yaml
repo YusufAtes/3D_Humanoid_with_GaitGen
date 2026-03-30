@@ -92,7 +92,7 @@ agent:
   discriminator_loss_scale: 5.0
   amp_batch_size: 512
   task_reward_weight: 0.8
-  style_reward_weight: 0.6      #For the second training reduce this to 0.2
+  style_reward_weight: 0.2      #For the second training reduce this to 0.2
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05

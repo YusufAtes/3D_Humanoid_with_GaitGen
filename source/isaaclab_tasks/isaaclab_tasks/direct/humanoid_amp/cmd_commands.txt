@@ -2,7 +2,7 @@
                         ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-10_06-55-38_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-12_19-15-19_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 512 --headless 
@@ -57,7 +57,7 @@ TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless 
 
 TRAIN (SECOND TRAINING):
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-02-25_13-40-32_amp_torch\checkpoints\best_agent.pt
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk/2026-03-06_23-53-26_amp_torch/checkpoints/best_agent.pt
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path --host 127.0.0.1

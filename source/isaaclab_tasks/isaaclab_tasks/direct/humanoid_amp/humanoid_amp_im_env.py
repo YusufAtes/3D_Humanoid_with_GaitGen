@@ -312,7 +312,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         vel_reward = fwd_vel_weight * vel_reward_fwd
 
         heading_reward = heading_weight * torch.exp(-2.5 * torch.abs(self._wrap_angle(self.robot_yaw - self.desired_headings)))
-        total_reward = total_reward + heading_reward
+        total_reward += heading_reward
 
         # vel_reward_ang = torch.exp(-5.0 * torch.abs(yaw_speed - (self.desired_ang_speeds)))
         # vel_reward += yaw_vel_weight * vel_reward_ang
@@ -320,10 +320,10 @@ class HumanoidAmpEnv(DirectRLEnv):
         lat_vel_reward = lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
         vel_reward += lat_vel_reward
 
-        total_reward = imitation_reward + vel_reward 
+        total_reward +=  imitation_reward + vel_reward 
 
         death_penalty = (self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height).float() * death_cost
-        total_reward = total_reward + death_penalty
+        total_reward +=  death_penalty
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
