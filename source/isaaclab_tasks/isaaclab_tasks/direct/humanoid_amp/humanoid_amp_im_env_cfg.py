@@ -60,7 +60,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     decimation = 2
 
     # spaces
-    observation_space = 84
+    observation_space = 83
     action_space = 28
     state_space = 0
     num_amp_observations = 2
@@ -80,7 +80,6 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     noise_seed: int = 42           # Seed for reproducible noise pattern across trials
     noise_type: str = "random"     # "random" or "wave"
     
-    second_training: bool = False
     # Noisy terrain (used when demo_type == "noise")
     terrain: TerrainImporterCfg = TerrainImporterCfg(
         prim_path="/World/ground",

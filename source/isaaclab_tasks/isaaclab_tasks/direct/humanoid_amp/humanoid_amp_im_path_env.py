@@ -17,19 +17,22 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import quat_apply
 
-# from .humanoid_amp_im_env_path_cfg import HumanoidAmpEnvCfg
-from .humanoid_amp_env_cfg import HumanoidAmpEnvCfg
-
+from .humanoid_amp_im_env_cfg import HumanoidAmpEnvCfg
 from .motions import MotionLoader
 from .gait_generator_net import SimpleFCNN
 from scipy.signal import resample
-
+import time
 
 class HumanoidAmpEnv(DirectRLEnv):
     cfg: HumanoidAmpEnvCfg
 
     def __init__(self, cfg: HumanoidAmpEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+        print("---------------------------------------------------------------------")
+        print("---------------------------------------------------------------------")
+        print("PATH ENV INITIALIZED")
+        print("---------------------------------------------------------------------")
+        print("---------------------------------------------------------------------")
 
         # action offset and scale
         dof_lower_limits = self.robot.data.soft_joint_pos_limits[0, :, 0]
@@ -64,7 +67,7 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\mean.npy")
         self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\std.npy")
-        self.leg_len = 0.855
+        self.leg_len = 0.83
         self.hip_knee = 0.4
         self.knee_ankle = 0.39
         self.dt = self.step_dt 
@@ -94,38 +97,26 @@ class HumanoidAmpEnv(DirectRLEnv):
             dtype=torch.int,
         )
 
-        self.desired_speeds = torch.zeros(
+        self.desired_fwd_speeds = torch.zeros(
             (self.num_envs,),
             device=self.sim.device,
             dtype=torch.float32,
         )
 
-        self.target_pos = torch.zeros(
-            (self.num_envs,2),
-            device=self.sim.device,
-            dtype=torch.float32,
-        )
-
-        self.past_torso_pos = torch.zeros(
-            (self.num_envs,2),
-            device=self.sim.device,
-            dtype=torch.float32,
-        )
-
-        self.current_target_dist = torch.ones(
+        self.desired_headings = torch.zeros(
             (self.num_envs,),
             device=self.sim.device,
             dtype=torch.float32,
         )
 
-        self.heading_error = torch.zeros(
+        self.robot_yaw = torch.zeros(
             (self.num_envs,),
             device=self.sim.device,
             dtype=torch.float32,
         )
 
         # TESTING SETTING
-        self.test_speed: float | None = None
+        self.test_fwd_speed: float | None = None
         self.demo_mode= self.cfg.demo_mode
         if self.demo_mode:
             self.demo_type = self.cfg.demo_type
@@ -138,12 +129,19 @@ class HumanoidAmpEnv(DirectRLEnv):
         if self.test_slope_deg != 0:
             self.ramp_demo = True
 
-    def set_test_speed(self, speed: float | None):
+    def set_test_speed(self, fwd_speed: float | None):
         """If speed is not None, all envs will use this fixed speed at reset."""
-        if speed is None:
-            self.test_speed = None
+        if fwd_speed is None:
+            self.test_fwd_speed = None
         else:
-            self.test_speed = float(speed)
+            self.test_fwd_speed = float(fwd_speed)
+
+    def set_test_heading(self, fwd_heading: float | None):
+        """If speed is not None, all envs will use this fixed speed at reset."""
+        if fwd_heading is None:
+            self.test_heading = None
+        else:
+            self.test_heading = float(fwd_heading)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -226,22 +224,35 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.robot.data.body_ang_vel_w[:, self.ref_body_index],
             self.robot.data.body_pos_w[:, self.key_body_indexes],
         )
-
+        torso_quat = self.robot.data.body_quat_w[:, self.ref_body_index] 
+        self.robot_yaw = self._quat_to_yaw(torso_quat)
+        self.heading_error = self._wrap_angle(self.desired_headings - self.robot_yaw)
         # # --------------------------    Gait Generator System    --------------------------#
         if self.reference is not None:
             self.phase_step = (self.episode_length_buf + self.random_start_idx) % self.periods
             self.phase = self.phase_step / self.periods
-            # print(f"Current target dist: {self.current_target_dist.item()}, Heading error: {self.heading_error.item()}")
-            obs = torch.cat(
-                (
-                    obs,
-                    self.phase.unsqueeze(1),
-                    self.desired_speeds.unsqueeze(1),
-                    self.current_target_dist.unsqueeze(1),
-                    self.heading_error.unsqueeze(1)
-                ),
-                dim=-1
+
+            if self.cfg.second_training:
+                obs = torch.cat(
+                    (
+                        obs,
+                        self.phase.unsqueeze(1),
+                        self.desired_fwd_speeds.unsqueeze(1),
+                        self.heading_error.unsqueeze(1)
+                    ),
+                    dim=-1
                 )
+
+            else:
+                obs = torch.cat(
+                    (
+                        obs,
+                        self.phase.unsqueeze(1),
+                        self.desired_fwd_speeds.unsqueeze(1),
+                        torch.zeros((self.num_envs,1), device=self.sim.device, dtype=torch.float32)
+                    ),
+                    dim=-1
+                    )
         # # --------------------------    Gait Generator System    --------------------------#
 
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
@@ -254,36 +265,30 @@ class HumanoidAmpEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         total_reward = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
-        imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
-        imitation_coeff = torch.where(self.desired_speeds > 0.5, imitation_coeff * torch.exp( -1.5 *  (self.desired_speeds - 0.5)), imitation_coeff)
 
-        env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
+        decay_factor = 0.75
+        imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
+        imitation_coeff = torch.where(self.desired_fwd_speeds > decay_factor, imitation_coeff * torch.exp( -1.0 *  (self.desired_fwd_speeds - decay_factor)), imitation_coeff)
 
         if self.cfg.second_training:
-            imitation_weight_hip_pos  = 0.125 
-            imitation_weight_knee_pos = 0.125 
 
-            fwd_vel_weight = 0.25  
-            lat_vel_weight = 0.05
-            yaw_vel_weight = 0.05
+            imitation_weight_hip_pos  = 0.1 * imitation_coeff
+            imitation_weight_knee_pos = 0.1 * imitation_coeff
 
-            target_distance_weight = 0.6
-            target_heading_weight = 0.2
-            target_reached_weight = 1.0
+            fwd_vel_weight = 0.3             * (1 /imitation_coeff)
+            lat_vel_weight = 0.0
+            heading_weight = 1.0
             death_cost = -1.0
         else:
-            imitation_weight_hip_pos  = 0.35 * imitation_coeff
-            imitation_weight_knee_pos = 0.35 * imitation_coeff
+            imitation_weight_hip_pos  = 0.375 * imitation_coeff
+            imitation_weight_knee_pos = 0.375 * imitation_coeff
 
-            fwd_vel_weight = 0.7  * (1 /imitation_coeff)
-            lat_vel_weight = 0.1
-            yaw_vel_weight = 0.0
+            fwd_vel_weight = 0.75             * (1 /imitation_coeff)
+            lat_vel_weight = 0.0
+            heading_weight = 0.0
+            death_cost = -1.5
 
-            target_distance_weight = 0.0
-            target_heading_weight = 0.0
-            target_reached_weight = 0.0
-            death_cost = -1.0
-
+        env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
 
         current_ref_pos   = self.reference[env_ids,self.phase_step,:]           # [N,6]
 
@@ -292,14 +297,14 @@ class HumanoidAmpEnv(DirectRLEnv):
         hip_ref_pos = current_ref_pos[:,[0,2]]
         hip_diff      = hip_joint_pos - hip_ref_pos          # [N, 2]
         hip_dist      = torch.norm(hip_diff, p=2, dim=-1)    # [N]
-        imitation_reward = imitation_reward + imitation_weight_hip_pos * torch.exp(-5.0 * hip_dist)
+        imitation_reward = imitation_reward + imitation_weight_hip_pos * torch.exp(-3.0 * hip_dist)
 
         # knees
         knee_joint_pos = self.robot.data.joint_pos[:, [20, 21]]         # [N, 2]
         knee_ref_pos   = current_ref_pos[:,[1,3]]
         knee_diff      = knee_joint_pos - knee_ref_pos
         knee_dist      = torch.norm(knee_diff, p=2, dim=-1)
-        imitation_reward = imitation_reward + imitation_weight_knee_pos * torch.exp(-5.0 * knee_dist)
+        imitation_reward = imitation_reward + imitation_weight_knee_pos * torch.exp(-3.0 * knee_dist)
 
         # Body velocity
         vel_b = self.robot.data.root_com_lin_vel_b  # [N, 3]
@@ -309,52 +314,25 @@ class HumanoidAmpEnv(DirectRLEnv):
         forward_speed  = vel_b[:, 0]   # along robot-forward (x)
         lateral_speed  = vel_b[:, 1]   # sideways (y)
         yaw_speed = vel_ang[:, 2]   # yaw (w)
-        vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_speeds * 2.4)))
-        vel_reward = fwd_vel_weight * vel_reward_fwd
-        vel_reward += lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
-        vel_reward += yaw_vel_weight * torch.exp(-4.0 * torch.abs(yaw_speed))
 
-        total_reward = imitation_reward + vel_reward 
+        vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
+        vel_reward = fwd_vel_weight * vel_reward_fwd
+
+        # Heading reward via yaw-rate P-controller (FIX 3)
+        desired_yaw_rate = torch.clamp(0.5 * self.heading_error, -1.0, 1.0)
+        yaw_tracking_err = torch.abs(desired_yaw_rate - yaw_speed)
+        heading_reward   = heading_weight * torch.exp(-yaw_tracking_err / 0.25)
+
+        # vel_reward_ang = torch.exp(-5.0 * torch.abs(yaw_speed - (self.desired_ang_speeds)))
+        # vel_reward += yaw_vel_weight * vel_reward_ang
+
+        # lat_vel_reward = lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
+        # vel_reward += lat_vel_reward
+
+        total_reward +=  imitation_reward + vel_reward + heading_reward
 
         death_penalty = (self.robot.data.body_pos_w[:, self.ref_body_index, 2] < self.cfg.termination_height).float() * death_cost
-
-        # distance to current target
-        torso_pos_x = self.robot.data.body_pos_w[:, self.ref_body_index, 0]
-        torso_pos_y = self.robot.data.body_pos_w[:, self.ref_body_index, 1]
-        torso_pos = torch.stack([torso_pos_x, torso_pos_y], dim=-1)  # [N,2]
-
-        self.current_target_dist = torch.norm(torso_pos - self.target_pos, p=2, dim=-1)  # [N]
-
-        reached_mask = self.current_target_dist < 0.1
-        target_reached_reward = reached_mask.float() * target_reached_weight
-
-        # IMPORTANT: if reached, immediately sample a new target for those envs
-        if reached_mask.any():
-            reached_env_ids = env_ids[reached_mask]  # env_ids you already defined earlier in _get_rewards
-            self._resample_waypoint_targets(reached_env_ids, distance_m=1.0, max_offset_deg=20.0)
-
-        past_target_dist = torch.norm(self.past_torso_pos - self.target_pos, p=2, dim=-1)
-        distance_change = past_target_dist - self.current_target_dist
-        vel_to_target = distance_change / self.dt
-
-        target_distance_reward = target_distance_weight * torch.exp(-4.0 * torch.abs(vel_to_target - (self.desired_speeds * 2.4)))
-
-        # heading reward (keep your version, but compute yaw safely)
-        torso_quat = self.robot.data.body_quat_w[env_ids, self.ref_body_index]  # [N,4]
-        torso_yaw_heading = self._quat_wxyz_to_yaw(torso_quat)                  # [N]
-
-        target_heading = torch.atan2(
-            self.target_pos[:, 1] - torso_pos[:, 1],
-            self.target_pos[:, 0] - torso_pos[:, 0],
-        )
-
-        # Wrap heading error to [-pi, pi] to avoid discontinuity
-        self.heading_error = torch.atan2(torch.sin(target_heading - torso_yaw_heading), torch.cos(target_heading - torso_yaw_heading))
-        target_heading_reward = target_heading_weight * torch.exp(-4.0 * torch.abs(self.heading_error))
-
-        self.past_torso_pos = torso_pos
-        total_reward = total_reward + death_penalty  + target_distance_reward + target_heading_reward + target_reached_reward
-
+        total_reward +=  death_penalty
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -380,7 +358,7 @@ class HumanoidAmpEnv(DirectRLEnv):
             if self.cfg.early_termination:
                 # 1. Get Robot Root positions
                 # Assumes self.ref_body_index is the torso/root
-                root_x = self.robot.data.body_pos_w[:, self.ref_body_index, 0] 
+                root_y = self.robot.data.body_pos_w[:, self.ref_body_index, 0] 
                 root_z = self.robot.data.body_pos_w[:, self.ref_body_index, 2]
 
                 # 2. Calculate Slope Angle in Radians
@@ -390,7 +368,7 @@ class HumanoidAmpEnv(DirectRLEnv):
 
                 # 3. Calculate Floor Z at the current Y position
                 # Formula: z_floor = y * tan(theta)
-                floor_z = root_x * torch.tan(-slope_rad)
+                floor_z = root_y * torch.tan(-slope_rad)
                 # print(f"Floor Z: {floor_z}")
                 # 4. Calculate Relative Height
                 # This is the height of the robot ABOVE the calculated inclined floor
@@ -423,13 +401,20 @@ class HumanoidAmpEnv(DirectRLEnv):
         i = 0
         for env_id in env_ids:
 
-            if self.demo_mode and (self.test_speed is not None):
+            if self.demo_mode and (self.test_fwd_speed is not None):
                 self.episode_length_buf[env_ids] = 0
-                self.desired_speeds[env_id] = self.test_speed / 2.4
-                self.reference_speed = self.test_speed / 2.4
+                self.desired_fwd_speeds[env_id] = self.test_fwd_speed / 2.4
+
+                if self.test_heading is not None:
+                    self.desired_headings[env_id] = self.test_heading
+                    print(f"Heading is set to: {self.test_heading}")
+                else:
+                    self.desired_headings[env_id] = 0 
+
+                self.reference_fwd_speed = self.test_fwd_speed / 2.4
                 random_idx = None
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed
+                encoder_vec[0] = self.reference_fwd_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
@@ -440,17 +425,20 @@ class HumanoidAmpEnv(DirectRLEnv):
                 self.reference[env_id,[1,3]]  = torch.clamp(self.reference[env_id,[1,3]] , -np.pi, 0)     
                 root_state[i, 2] += 0.4
 
-            elif self.demo_mode and (self.test_speed is None):
+            elif self.demo_mode and (self.test_fwd_speed is None):
                 raise ValueError("NO TEST SPEED IS DEFINED!!!!!")
 
             else:
-                # After writing root/joints to sim, sample waypoint targets in front of the robot
-                self.reference_speed = np.random.uniform(0.1, 2.4) / 2.4
+                self.reference_fwd_speed = np.random.uniform(0.1, 2.4) / 2.4
+                self.reference_heading = np.random.uniform(-1.0, 1.0)
+
                 random_idx = np.random.randint(0,int(3/self.dt))
-                self.desired_speeds[env_id] = self.reference_speed 
+
+                self.desired_fwd_speeds[env_id] = self.reference_fwd_speed 
+                self.desired_headings[env_id] = self.reference_heading
                 
                 encoder_vec = torch.empty((3),device=self.sim.device)   
-                encoder_vec[0] = self.reference_speed
+                encoder_vec[0] = self.reference_fwd_speed
                 encoder_vec[1] = self.leg_len /1.0
                 encoder_vec[2] = self.leg_len /1.0
 
@@ -460,7 +448,7 @@ class HumanoidAmpEnv(DirectRLEnv):
                 self.reference[env_id,[1,3]]  = torch.clamp(self.reference[env_id,[1,3]] , -np.pi, 0)             #Clip the knee angle
             
 
-            if random_idx is not None:
+            if random_idx:
                 self.random_start_idx[env_id] = self.phase_step[env_id]
 
                 rhip_pos = self.reference[env_id,self.phase_step[env_id],0]
@@ -468,12 +456,13 @@ class HumanoidAmpEnv(DirectRLEnv):
 
                 rknee_pos = self.reference[env_id,self.phase_step[env_id],1]
                 lknee_pos = self.reference[env_id,self.phase_step[env_id],3]
-                # hip_rad = lhip_pos if torch.abs(rhip_pos) > torch.abs(lhip_pos) else rhip_pos
-                # knee_rad = lknee_pos if torch.abs(rknee_pos) > torch.abs(lknee_pos) else rknee_pos
 
-                # hip_short = self.hip_knee - (torch.cos(hip_rad) * self.hip_knee)
-                # knee_short = self.knee_ankle - (torch.cos(knee_rad) * self.knee_ankle)
-                # total_short = hip_short + knee_short - 0.03 if (hip_short+knee_short) > 0.05 else 0
+                hip_rad = lhip_pos if torch.abs(rhip_pos) > torch.abs(lhip_pos) else rhip_pos
+                knee_rad = lknee_pos if torch.abs(rknee_pos) > torch.abs(lknee_pos) else rknee_pos
+
+                hip_short = self.hip_knee - (torch.cos(hip_rad) * self.hip_knee)
+                knee_short = self.knee_ankle - (torch.cos(knee_rad) * self.knee_ankle)
+                total_short = hip_short + knee_short - 0.03 if (hip_short+knee_short) > 0.05 else 0
                 # -------------------- RSI ON -----------------------------#
                 joint_pos[i,12] = rhip_pos
                 joint_pos[i,20] = rknee_pos
@@ -488,8 +477,6 @@ class HumanoidAmpEnv(DirectRLEnv):
         self.robot.write_root_link_pose_to_sim(root_state[:, :7], env_ids)
         self.robot.write_root_com_velocity_to_sim(root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
-        self._resample_waypoint_targets(env_ids, distance_m=1.0, max_offset_deg=20.0)
-
 
     def _reset_strategy_default(self, env_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         root_state = self.robot.data.default_root_state[env_ids].clone()
@@ -526,6 +513,28 @@ class HumanoidAmpEnv(DirectRLEnv):
         self.amp_observation_buffer[env_ids] = amp_observations.view(num_samples, self.cfg.num_amp_observations, -1)
 
         return root_state, dof_pos, dof_vel
+
+    @staticmethod
+    def _quat_to_yaw(quat_wxyz: torch.Tensor) -> torch.Tensor:
+        """
+        Extract yaw (rotation around world Z) from quaternion.
+        IsaacLab body_quat_w uses (w, x, y, z) ordering.
+        Returns shape [N].
+        """
+        w = quat_wxyz[:, 0]
+        x = quat_wxyz[:, 1]
+        y = quat_wxyz[:, 2]
+        z = quat_wxyz[:, 3]
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return torch.atan2(siny_cosp, cosy_cosp)          # [-π, π]
+
+    # ──────────────────────────────────────────────────────────────────────
+    # HELPER: wrap angle to [-π, π]
+    # ──────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _wrap_angle(angle: torch.Tensor) -> torch.Tensor:
+        return torch.atan2(torch.sin(angle), torch.cos(angle)) / torch.pi
 
     def collect_reference_motions(self, num_samples: int, current_times: np.ndarray | None = None) -> torch.Tensor:
         if current_times is None:
@@ -595,7 +604,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         return pred_time
     
     def find_closest_index(self,reference,period):
-        if self.demo_mode and (self.test_speed is not None):
+        if self.demo_mode and (self.test_fwd_speed is not None):
             distances = torch.abs(reference[:period,:]).sum(dim=-1)
             closest_index = torch.argmin(distances)
             active_phase_step = closest_index.item()
@@ -603,54 +612,6 @@ class HumanoidAmpEnv(DirectRLEnv):
             return active_phase_step
         else:
             raise ValueError("No test speed provided")
-
-    def _quat_wxyz_to_yaw(self, quat_wxyz: torch.Tensor) -> torch.Tensor:
-        """Convert quaternion (w,x,y,z) -> yaw (rad). Works with shape [N,4] or [4]."""
-        if quat_wxyz.ndim == 1:
-            quat_wxyz = quat_wxyz.unsqueeze(0)
-
-        qw = quat_wxyz[:, 0]
-        qx = quat_wxyz[:, 1]
-        qy = quat_wxyz[:, 2]
-        qz = quat_wxyz[:, 3]
-
-        # yaw (Z axis rotation)
-        siny_cosp = 2.0 * (qw * qz + qx * qy)
-        cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
-        yaw = torch.atan2(siny_cosp, cosy_cosp)
-        return yaw
-
-
-    def _resample_waypoint_targets(
-        self,
-        env_ids: torch.Tensor,
-        distance_m: float = 1.0,
-        max_offset_deg: float = 20.0,
-    ):
-        """Set a new waypoint target 2m away within ±30° of the robot's current yaw heading."""
-        if env_ids.numel() == 0:
-            return
-
-        # current torso position (world)
-        torso_pos_w = self.robot.data.body_pos_w[env_ids, self.ref_body_index, 0:2]  # [M,2]
-        torso_quat_w = self.robot.data.body_quat_w[env_ids, self.ref_body_index]     # [M,4] (w,x,y,z)
-
-        yaw = self._quat_wxyz_to_yaw(torso_quat_w)  # [M]
-
-        max_offset_rad = math.radians(max_offset_deg)
-        offset = (2.0 * torch.rand((env_ids.shape[0],), device=self.sim.device) - 1.0) * max_offset_rad  # [-max,+max]
-        target_angle = yaw + offset
-
-        # dx = distance_m * torch.cos(target_angle)
-        # dy = distance_m * torch.sin(target_angle)
-        dx = 1.0
-        dy = 0.0
-        new_target_xy = torch.stack([torso_pos_w[:, 0] + dx, torso_pos_w[:, 1] + dy], dim=-1)  # [M,2]
-
-        self.target_pos[env_ids] = new_target_xy
-        # reset past position baseline so your distance_change reward doesn't spike weirdly
-        self.past_torso_pos[env_ids] = torso_pos_w
-
 
 @torch.jit.script
 def quaternion_to_tangent_and_normal(q: torch.Tensor) -> torch.Tensor:

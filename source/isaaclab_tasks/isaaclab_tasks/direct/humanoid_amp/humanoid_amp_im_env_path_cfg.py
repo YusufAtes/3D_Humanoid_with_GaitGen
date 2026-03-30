@@ -60,7 +60,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     decimation = 2
 
     # spaces
-    observation_space = 85
+    observation_space = 84
     action_space = 28
     state_space = 0
     num_amp_observations = 2
@@ -69,6 +69,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     termination_height = 0.7
     
     # NEW: Added this field to control slope at spawn time
+    second_training: bool = False
     demo_mode: bool= False
     demo_type: str= "vel"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
@@ -78,7 +79,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     noise_seed: int = 42           # Seed for reproducible noise pattern across trials
     noise_type: str = "random"     # "random" or "wave"
     
-    second_training: bool = False
+
     # Noisy terrain (used when demo_type == "noise")
     terrain: TerrainImporterCfg = TerrainImporterCfg(
         prim_path="/World/ground",
