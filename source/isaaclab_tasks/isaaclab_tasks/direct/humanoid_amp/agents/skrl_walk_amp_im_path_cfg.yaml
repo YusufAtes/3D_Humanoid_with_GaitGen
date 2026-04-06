@@ -84,6 +84,8 @@ agent:
   random_timesteps: 0
   learning_starts: 0
   grad_norm_clip: 0.0
+  # First training:  ratio_clip: 0.2, value_clip: 0.2
+  # Second training: ratio_clip: 0.1, value_clip: 0.1  (tighter clip keeps policy near pretrained)
   ratio_clip: 0.2
   value_clip: 0.2
   clip_predicted_values: True
@@ -91,8 +93,10 @@ agent:
   value_loss_scale: 2.5
   discriminator_loss_scale: 5.0
   amp_batch_size: 512
+  # First training:  task_reward_weight: 0.8, style_reward_weight: 0.6
+  # Second training: task_reward_weight: 0.8, style_reward_weight: 0.2
   task_reward_weight: 0.8
-  style_reward_weight: 0.6      #For the second training reduce this to 0.2
+  style_reward_weight: 0.6
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05
@@ -112,5 +116,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 1_000_000
+  timesteps: 300_000
   environment_info: log

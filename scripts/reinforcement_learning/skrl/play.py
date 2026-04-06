@@ -133,7 +133,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     demo_mode = "vel"
     desired_speed = 1.2
-    desired_heading = -1.0
+    desired_ang_speed = 0.0
     
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -187,7 +187,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     
     env.unwrapped.set_test_speed(desired_speed)
-    env.unwrapped.set_test_heading(desired_heading)
+    env.unwrapped.set_test_ang_speed(desired_ang_speed)
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
         env = multi_agent_to_single_agent(env)
@@ -224,7 +224,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
-            "name_prefix": f"speed_{desired_speed}_heading_{desired_heading}_{demo_mode}", 
+            "name_prefix": f"speed_{desired_speed}_heading_{desired_ang_speed}_{demo_mode}", 
             "fps": 30,
             }
         print("[INFO] Recording videos during training.")
