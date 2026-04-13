@@ -29,11 +29,6 @@ class HumanoidAmpEnv(DirectRLEnv):
 
     def __init__(self, cfg: HumanoidAmpEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-        print("---------------------------------------------------------------------")
-        print("---------------------------------------------------------------------")
-        print("PATH ENV INITIALIZED")
-        print("---------------------------------------------------------------------")
-        print("---------------------------------------------------------------------")
 
         # action offset and scale
         dof_lower_limits = self.robot.data.soft_joint_pos_limits[0, :, 0]
@@ -136,16 +131,18 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.ramp_demo = True
 
         # # --------------------------    Curriculum System    --------------------------#
-        self._curriculum_ang_half_range = 0.1
+        self._curriculum_ang_half_range = 0.25
         self._curriculum_max_half_range = 1.0
         self._curriculum_step = 0.1
-        self._curriculum_threshold = 0.7
-        self._curriculum_N = 15000
+        self._curriculum_threshold = 0.5
+        self._curriculum_N = 45000
         self._curriculum_ep_buf = torch.zeros(self._curriculum_N, device=self.sim.device)
         self._curriculum_ep_write_idx = 0
         self._curriculum_ep_count = 0
         self._yaw_reward_sum = torch.zeros(self.num_envs, device=self.sim.device)
         self._yaw_reward_steps = torch.zeros(self.num_envs, device=self.sim.device)
+        self._yaw_vel_weight = 0.8
+        self._yaw_vel_weight_max = 1.5
 
     def set_test_speed(self, fwd_speed: float | None):
         """If speed is not None, all envs will use this fixed speed at reset."""
@@ -275,20 +272,20 @@ class HumanoidAmpEnv(DirectRLEnv):
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
 
-        # --- WORLD-FRAME AMP obs (used for both first & second training) ---
-        self.amp_observation_buffer[:, 0] = obs[:,:81].clone()
+        # # --- WORLD-FRAME AMP obs ---
+        # self.amp_observation_buffer[:, 0] = obs[:,:81].clone()
 
-        # --- YAW-INVARIANT AMP obs (experimental — keep for reference) ---
-        # amp_obs = compute_amp_obs_yaw_invariant(
-        #     self.robot.data.joint_pos,
-        #     self.robot.data.joint_vel,
-        #     self.robot.data.body_pos_w[:, self.ref_body_index],
-        #     self.robot.data.body_quat_w[:, self.ref_body_index],
-        #     self.robot.data.body_lin_vel_w[:, self.ref_body_index],
-        #     self.robot.data.body_ang_vel_w[:, self.ref_body_index],
-        #     self.robot.data.body_pos_w[:, self.key_body_indexes],
-        # )
-        # self.amp_observation_buffer[:, 0] = amp_obs.clone()
+        # --- YAW-INVARIANT AMP obs (discriminator is blind to heading) ---
+        amp_obs = compute_amp_obs_yaw_invariant(
+            self.robot.data.joint_pos,
+            self.robot.data.joint_vel,
+            self.robot.data.body_pos_w[:, self.ref_body_index],
+            self.robot.data.body_quat_w[:, self.ref_body_index],
+            self.robot.data.body_lin_vel_w[:, self.ref_body_index],
+            self.robot.data.body_ang_vel_w[:, self.ref_body_index],
+            self.robot.data.body_pos_w[:, self.key_body_indexes],
+        )
+        self.amp_observation_buffer[:, 0] = amp_obs.clone()
 
         self.extras = {"amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)}
 
@@ -304,14 +301,13 @@ class HumanoidAmpEnv(DirectRLEnv):
         imitation_coeff = torch.where(self.desired_fwd_speeds > decay_factor, imitation_coeff * torch.exp( -1.0 *  (self.desired_fwd_speeds - decay_factor)), imitation_coeff)
 
         if self.cfg.second_training:
-            print("----------------------------------------")
             # Fine-tuning from straight-walking checkpoint.
             # Imitation reduced (AMP + pretrained inertia keep gait quality).
             # Yaw is the PRIMARY new objective — must dominate the task signal.
             imitation_weight_hip_pos  = 0.15
             imitation_weight_knee_pos = 0.15
             fwd_vel_weight = 0.6            
-            yaw_vel_weight = 0.8
+            yaw_vel_weight = self._yaw_vel_weight
             lat_vel_weight = 0.15
             death_cost = -1.75
         else:
@@ -350,16 +346,20 @@ class HumanoidAmpEnv(DirectRLEnv):
         lateral_speed  = vel_b[:, 1]   # sideways (y)
         yaw_speed = vel_ang[:, 2]   # yaw (w)
 
-        vel_reward_fwd = torch.exp(-3.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
+        vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
         vel_reward = fwd_vel_weight * vel_reward_fwd
 
+        yaw_error = torch.abs(yaw_speed - self.desired_ang_speeds)
+        tracking_comp = torch.exp(-4.0 * yaw_error)
+        direction_comp = torch.clamp(
+            yaw_speed * torch.sign(self.desired_ang_speeds), min=0.0
+        )
+        vel_reward_ang = 0.75 * tracking_comp + 0.25 * torch.tanh(direction_comp)
+        vel_reward += yaw_vel_weight * vel_reward_ang
+
         if self.cfg.second_training and not self.demo_mode:
-            vel_reward_ang = torch.exp(-3.0 * torch.abs(yaw_speed - (self.desired_ang_speeds)))
-            vel_reward += yaw_vel_weight * vel_reward_ang
-            self._yaw_reward_sum += vel_reward_ang
+            self._yaw_reward_sum += tracking_comp
             self._yaw_reward_steps += 1
-        else:
-            vel_reward += yaw_vel_weight * torch.exp(-3.0 * torch.abs(yaw_speed))
 
         lat_vel_reward = lat_vel_weight * torch.exp(-3.0 * torch.abs(lateral_speed))
         vel_reward += lat_vel_reward
@@ -445,9 +445,9 @@ class HumanoidAmpEnv(DirectRLEnv):
 
                     if self.test_ang_speed is not None:
                         self.desired_ang_speeds[env_id] = self.test_ang_speed
-                        print("----------------------------------------")
-                        print(f"Yaw Speed is set to: {self.test_ang_speed}")
-                        print("----------------------------------------")
+                        # print("----------------------------------------")
+                        # print(f"Yaw Speed is set to: {self.test_ang_speed}")
+                        # print("----------------------------------------")
                     else:
                         self.desired_ang_speeds[env_id] = 0 
 
@@ -493,12 +493,20 @@ class HumanoidAmpEnv(DirectRLEnv):
                                     old_r + self._curriculum_step,
                                     self._curriculum_max_half_range,
                                 )
-                                self._curriculum_ep_count = 0
-                                self._curriculum_ep_write_idx = 0
                                 print(f"[CURRICULUM] Mean yaw reward {buf_mean:.3f} > "
                                       f"{self._curriculum_threshold} threshold")
                                 print(f"[CURRICULUM] Angular vel range expanded: "
                                       f"±{old_r:.1f} → ±{self._curriculum_ang_half_range:.1f}")
+                            else:
+                                if self._yaw_vel_weight < self._yaw_vel_weight_max:
+                                    self._yaw_vel_weight = min(
+                                        self._yaw_vel_weight + 0.02,
+                                        self._yaw_vel_weight_max,
+                                    )
+                                    print(f"[CURRICULUM] Threshold not met (mean={buf_mean:.3f}). "
+                                          f"Yaw vel weight increased to {self._yaw_vel_weight:.2f}")
+                            self._curriculum_ep_count = 0
+                            self._curriculum_ep_write_idx = 0
                     self._yaw_reward_sum[env_ids] = 0
                     self._yaw_reward_steps[env_ids] = 0
 
@@ -510,7 +518,7 @@ class HumanoidAmpEnv(DirectRLEnv):
                     reference_ang_speed = ((torch.rand(num_reset, device=device) * 2 - 1)
                                            * self._curriculum_ang_half_range)
                 else:
-                    reference_ang_speed = torch.rand(num_reset, device=device) * 0.2 - 0.1
+                    reference_ang_speed = torch.rand(num_reset, device=device) * 0.5 - 0.25
                 
                 # int(3/self.dt) bounds
                 max_idx = int(3 / self.dt)
@@ -652,19 +660,8 @@ class HumanoidAmpEnv(DirectRLEnv):
             body_linear_velocities,
             body_angular_velocities,
         ) = self._motion_loader.sample(num_samples=num_samples, times=times)
-        # --- WORLD-FRAME AMP obs (matches _get_observations) ---
-        amp_observation = compute_obs(
-            dof_positions[:, self.motion_dof_indexes],
-            dof_velocities[:, self.motion_dof_indexes],
-            body_positions[:, self.motion_ref_body_index],
-            body_rotations[:, self.motion_ref_body_index],
-            body_linear_velocities[:, self.motion_ref_body_index],
-            body_angular_velocities[:, self.motion_ref_body_index],
-            body_positions[:, self.motion_key_body_indexes],
-        )
-
-        # --- YAW-INVARIANT AMP obs (experimental — keep for reference) ---
-        # amp_observation = compute_amp_obs_yaw_invariant(
+        # # --- WORLD-FRAME AMP obs ---
+        # amp_observation = compute_obs(
         #     dof_positions[:, self.motion_dof_indexes],
         #     dof_velocities[:, self.motion_dof_indexes],
         #     body_positions[:, self.motion_ref_body_index],
@@ -673,6 +670,17 @@ class HumanoidAmpEnv(DirectRLEnv):
         #     body_angular_velocities[:, self.motion_ref_body_index],
         #     body_positions[:, self.motion_key_body_indexes],
         # )
+
+        # --- YAW-INVARIANT AMP obs (discriminator is blind to heading) ---
+        amp_observation = compute_amp_obs_yaw_invariant(
+            dof_positions[:, self.motion_dof_indexes],
+            dof_velocities[:, self.motion_dof_indexes],
+            body_positions[:, self.motion_ref_body_index],
+            body_rotations[:, self.motion_ref_body_index],
+            body_linear_velocities[:, self.motion_ref_body_index],
+            body_angular_velocities[:, self.motion_ref_body_index],
+            body_positions[:, self.motion_key_body_indexes],
+        )
         return amp_observation.view(-1, self.amp_observation_size)
 
     def findgait(self, input_vec: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

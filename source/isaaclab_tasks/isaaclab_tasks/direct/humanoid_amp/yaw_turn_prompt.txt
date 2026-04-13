@@ -1,0 +1,49 @@
+Project: Humanoid path-following via AMP (Adversarial Motion Priors) in Isaac Lab with SKRL.
+
+Goal: A 28-DOF humanoid robot that walks naturally AND follows curved paths by tracking both forward velocity and angular (yaw) velocity commands. The motion dataset contains ONLY straight-line walking — turning must be learned purely through reward shaping, not from reference motions.
+
+Architecture: SKRL's AMP agent. A policy network (GaussianMixin, [1024, 512]) outputs 28 joint position targets. A discriminator network (DeterministicMixin, [1024, 512]) scores whether the robot's current state "looks like" the reference straight-walking motion. The final reward = task_reward_weight * task_reward + style_reward_weight * discriminator_reward. A RunningStandardScaler normalizes policy observations and AMP observations.
+
+Two-Phase Training Strategy:
+
+Phase 1 (completed, works well): Train from scratch with style_weight=0.6, task_weight=0.8, ratio_clip=0.2. Task reward includes gait imitation (hip/knee tracking from a gait generator network), forward velocity tracking, and lateral velocity penalty. Yaw velocity weight = 0. The angular speed observation dimension is always 0. Result: stable, natural straight-line walking at variable speeds.
+Phase 2 (current, failing): Fine-tune from Phase 1 checkpoint with style_weight=0.15, task_weight=0.8, ratio_clip=0.12. Introduce yaw velocity tracking reward (starting weight=0.8, escalated by curriculum up to 2.0). A curriculum system samples angular velocity demands from ±0.25 rad/s, checks mean yaw reward over 45,000 episodes, and either expands the range (if threshold met) or increases the yaw weight by 0.02 (if not met).
+Observation space: 84-dim = 81 (joint pos/vel, root height, tangent/normal, root lin/ang vel, key-body rel pos) + phase + desired_fwd_speed + desired_ang_speed.
+
+AMP observation: First 81 dims of the observation, in world frame. The discriminator sees world-frame tangent/normal vectors, world-frame velocities, and world-frame key-body positions. The reference motion dataset provides straight-walking samples for the "real" class.
+
+What failed: After 550K+ timesteps (~10 hours), the mean yaw tracking reward is stuck at ~0.40–0.43. The curriculum never advances because the threshold (0.50) is never met. The yaw weight escalated from 0.8 to 2.0+ with no meaningful improvement. The robot appears to completely ignore yaw commands despite enormous yaw reward weight. The mean reward inches up by ~0.001 per curriculum cycle — effectively zero learning.
+
+Core tension: The AMP discriminator is trained on straight-walking data and continuously updates to distinguish "real" (straight) from "fake" (policy) motions. When the policy attempts any turning, the discriminator immediately detects it (world-frame features change) and penalizes it. The discriminator adapts faster than the policy can learn to turn, creating a stable equilibrium at "no turning." The tight ratio_clip=0.12 further constrains how quickly the policy can shift toward turning.
+
+
+
+Part 2: Diagnostic Analysis
+What the Terminal Output Reveals
+From the curriculum progression:
+
+Timestep	Mean Yaw Reward	Weight	Change Rate
+62K
+0.389
+1.18
+—
+100K
+0.401
+1.40
++0.003/cycle
+150K
+0.413
+1.64
++0.001/cycle
+195K
+0.426
+2.00 (max)
++0.001/cycle
+553K
+(no output)
+2.00+
+stalled
+The mean reward climbs by approximately +0.001 per 45K-episode cycle. This is not learning — it's noise. A mean of 0.40 with reward exp(-4|ω - ω_des|) implies an average tracking error of:
+
+0.40 = exp(-4x) → x ≈ 0.23 rad/s
+With demands sampled from ±0.25, the average absolute demand is ~0.125 rad/s. A tracking error of 0.23 means the robot achieves ω ≈ 0 regardless of what's commanded — it's simply collecting the baseline reward for having yaw_speed near zero when desired is also near zero (half the envs have small commands).

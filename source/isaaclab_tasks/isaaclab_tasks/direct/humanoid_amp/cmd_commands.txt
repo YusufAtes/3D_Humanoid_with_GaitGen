@@ -2,7 +2,7 @@
                         ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk/075_imitation_abs_diff_entcoeff/checkpoints/best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk/2026-04-06_14-53-41_amp_torch/checkpoints/best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 4096 --headless 
@@ -51,22 +51,38 @@ scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
                         ====================================    HUMANOID PATH INCLUDED AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-04_06-46-07_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
-
-TRAIN:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 2048 --headless 
-
-TRAIN (SECOND TRAINING):
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 512 --headless --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk/2026-03-06_23-53-26_amp_torch/checkpoints/best_agent.pt
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-12_21-52-10_amp_torch\checkpoints\agent_800000.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path --host 127.0.0.1 --port 6001
+
+
+--- PHASE 1: Straight walking with yaw-invariant AMP obs ---
+Settings before running:
+  humanoid_amp_im_env_path_cfg.py  ->  second_training = False,  demo_mode = False
+  skrl_walk_amp_im_path_cfg.yaml   ->  ratio_clip: 0.2, value_clip: 0.2, entropy_loss_scale: 1.0e-03
+                                       style_reward_weight: 0.6
+                                       discriminator_loss_scale: 5.0, discriminator_gradient_penalty_scale: 5.0, discriminator_weight_decay_scale: 1.0e-04
+
+TRAIN (PHASE 1 - from scratch):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 4096 --headless
+
+
+--- PHASE 2: Curve following with frozen discriminator ---
+Settings before running:
+  humanoid_amp_im_env_path_cfg.py  ->  second_training = True,  demo_mode = False
+  skrl_walk_amp_im_path_cfg.yaml   ->  ratio_clip: 0.15, value_clip: 0.15, entropy_loss_scale: 5.0e-04
+                                       style_reward_weight: 0.2
+                                       discriminator_loss_scale: 0.0, discriminator_gradient_penalty_scale: 0.0, discriminator_weight_decay_scale: 0.0
+
+TRAIN (PHASE 2 - from Phase 1 checkpoint):
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 4096 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\yaw_invariant_first\checkpoints\best_agent.pt
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Velocity Comparison Demo Code:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk_path/2026-04-06_06-46-20_amp_torch/checkpoints/best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-10_18-27-51_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

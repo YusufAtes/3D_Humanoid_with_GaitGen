@@ -84,30 +84,34 @@ agent:
   random_timesteps: 0
   learning_starts: 0
   grad_norm_clip: 0.0
-  # First training:  ratio_clip: 0.2, value_clip: 0.2
-  # Second training: ratio_clip: 0.1, value_clip: 0.1  (tighter clip keeps policy near pretrained)
-  ratio_clip: 0.2
-  value_clip: 0.2
+  # Phase 1: ratio_clip: 0.2  |  Phase 2: ratio_clip: 0.15
+  # Phase 1: value_clip: 0.2  |  Phase 2: value_clip: 0.15
+  ratio_clip: 0.15
+  value_clip: 0.15
   clip_predicted_values: True
-  entropy_loss_scale: 3.0e-04
+  # Phase 1: entropy_loss_scale: 1.0e-03  |  Phase 2: 5.0e-04
+  entropy_loss_scale: 5.0e-04
   value_loss_scale: 2.5
+  # Phase 1: discriminator_loss_scale: 5.0  |  Phase 2: 0.0 (frozen discriminator)
   discriminator_loss_scale: 5.0
   amp_batch_size: 512
-  # First training:  task_reward_weight: 0.8, style_reward_weight: 0.6
-  # Second training: task_reward_weight: 0.8, style_reward_weight: 0.2
+  # Phase 1: task_reward_weight: 0.8, style_reward_weight: 0.6
+  # Phase 2: task_reward_weight: 0.8, style_reward_weight: 0.2
   task_reward_weight: 0.8
-  style_reward_weight: 0.6
+  style_reward_weight: 0.15
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05
+  # Phase 1: 5.0  |  Phase 2: 0.0 (frozen discriminator)
   discriminator_gradient_penalty_scale: 5.0
-  discriminator_weight_decay_scale: 1.0e-04
+  # Phase 1: 1.0e-04  |  Phase 2: 0.0 (frozen discriminator)
+  discriminator_weight_decay_scale: 1.0e-4
   # rewards_shaper_scale: 1.0
   time_limit_bootstrap: False
   # logging and checkpoint
   experiment:
     directory: "humanoid_amp_im_walk_path"
-    experiment_name: ""
+    experiment_name: "yaw_invariant_unfrozen_500k"
     write_interval: auto
     checkpoint_interval: auto
 
@@ -116,5 +120,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 300_000
+  timesteps: 500000
   environment_info: log

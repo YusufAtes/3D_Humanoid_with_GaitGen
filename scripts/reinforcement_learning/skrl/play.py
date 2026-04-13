@@ -133,7 +133,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
 
     demo_mode = "vel"
     desired_speed = 1.2
-    desired_ang_speed = 0.0
+    desired_ang_speed = 0.5
     
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
