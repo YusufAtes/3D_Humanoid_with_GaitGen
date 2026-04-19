@@ -273,13 +273,9 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
         ## - Reduced AMP obs - Only include the first 56 dimensions
         amp_obs = compute_reduced_obs(
-                    self.robot.data.joint_pos,
-                    self.robot.data.joint_vel,
-                    self.robot.data.body_pos_w[:, self.ref_body_index],
-                    self.robot.data.body_quat_w[:, self.ref_body_index],
-                    self.robot.data.body_lin_vel_w[:, self.ref_body_index],
-                    self.robot.data.body_pos_w[:, self.key_body_indexes],
-                )
+            self.robot.data.joint_pos,
+            self.robot.data.joint_vel,
+        )
         self.amp_observation_buffer[:, 0] = amp_obs.clone()
 
         # # --- WORLD-FRAME AMP obs ---
@@ -313,8 +309,8 @@ class HumanoidAmpEnv(DirectRLEnv):
             imitation_weight_hip_pos  = 0.35 
             imitation_weight_knee_pos = 0.35
             fwd_vel_weight = 0.70
-            yaw_vel_weight = 0.175
-            lat_vel_weight = 0.175
+            yaw_vel_weight = 0.5
+            lat_vel_weight = 0.15
             death_cost = -1.75
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
@@ -516,7 +512,7 @@ class HumanoidAmpEnv(DirectRLEnv):
                     reference_ang_speed = ((torch.rand(num_reset, device=device) * 2 - 1)
                                            * self._curriculum_ang_half_range)
                 else:
-                    reference_ang_speed = torch.rand(num_reset, device=device) * 0.5 - 0.25
+                    reference_ang_speed = torch.rand(num_reset, device=device) * 1.0 - 0.5
                 
                 # int(3/self.dt) bounds
                 max_idx = int(3 / self.dt)
@@ -661,14 +657,10 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         
 
-        ## - Reduced AMP obs - Only include the first 60 dimensions
+        ## - Reduced AMP obs - Only include the first 56 dimensions
         amp_observation = compute_reduced_obs(
             dof_positions[:, self.motion_dof_indexes],
             dof_velocities[:, self.motion_dof_indexes],
-            body_positions[:, self.motion_ref_body_index],
-            body_rotations[:, self.motion_ref_body_index],
-            body_linear_velocities[:, self.motion_ref_body_index],
-            body_positions[:, self.motion_key_body_indexes],
         )
 
         # # --- WORLD-FRAME AMP obs ---
@@ -807,36 +799,11 @@ def compute_obs(
 def compute_reduced_obs(
     dof_positions: torch.Tensor,
     dof_velocities: torch.Tensor,
-    root_positions: torch.Tensor,
-    root_rotations: torch.Tensor,
-    root_linear_velocities: torch.Tensor,
-    key_body_positions: torch.Tensor,
 ) -> torch.Tensor:
-    """Reduced AMP observations (78-dim).
-
-    Includes everything from compute_obs EXCEPT root angular velocity.
-    This removes the yaw-rate signal that lets the discriminator detect
-    turning, while preserving root height, orientation, linear velocity,
-    and key body positions for gait quality enforcement.
-
-    Components:
-        dof_positions:          28  joint angles
-        dof_velocities:         28  joint velocities
-        root_height:             1  root z position
-        tangent_normal:          6  orientation (from quaternion)
-        root_linear_velocities:  3  linear velocity
-        key_body_rel_positions: 12  4 bodies × 3D relative to root
-        ─────────────────────────
-        Total:                  78
-    """
     obs = torch.cat(
         (
             dof_positions,
             dof_velocities,
-            root_positions[:, 2:3],  # root body height only
-            # quaternion_to_tangent_and_normal(root_rotations),
-            root_linear_velocities,
-            # (key_body_positions - root_positions.unsqueeze(-2)).view(key_body_positions.shape[0], -1),
         ),
         dim=-1,
     )

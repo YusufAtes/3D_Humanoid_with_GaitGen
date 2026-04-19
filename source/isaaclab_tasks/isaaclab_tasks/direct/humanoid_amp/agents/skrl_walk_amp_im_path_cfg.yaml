@@ -98,7 +98,7 @@ agent:
   # Phase 1: task_reward_weight: 0.8, style_reward_weight: 0.6
   # Phase 2: task_reward_weight: 0.8, style_reward_weight: 0.2
   task_reward_weight: 0.8
-  style_reward_weight: 0.15
+  style_reward_weight: 0.6
   discriminator_batch_size: 4096
   discriminator_reward_scale: 2.0
   discriminator_logit_regularization_scale: 0.05
@@ -111,7 +111,7 @@ agent:
   # logging and checkpoint
   experiment:
     directory: "humanoid_amp_im_walk_path"
-    experiment_name: "yaw_invariant_unfrozen_500k"
+    experiment_name: "reduced_amp_obs_first_train_60dim"
     write_interval: auto
     checkpoint_interval: auto
 
@@ -120,5 +120,5 @@ agent:
 # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
 trainer:
   class: SequentialTrainer
-  timesteps: 500000
+  timesteps: 1000000
   environment_info: log

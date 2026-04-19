@@ -64,13 +64,13 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     action_space = 28
     state_space = 0
     num_amp_observations = 2
-    amp_observation_space = 60
+    amp_observation_space = 56
     early_termination = True
     termination_height = 0.7
     
     # NEW: Added this field to control slope at spawn time
     second_training: bool = False
-    demo_mode: bool = False
+    demo_mode: bool = True
     demo_type: str= "vel"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
 

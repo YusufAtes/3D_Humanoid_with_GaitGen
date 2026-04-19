@@ -51,7 +51,7 @@ scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
                         ====================================    HUMANOID PATH INCLUDED AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-12_21-52-10_amp_torch\checkpoints\agent_800000.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-17_10-51-53_amp_torch_reduced_amp_obs_first_train\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path --host 127.0.0.1 --port 6001
@@ -76,7 +76,7 @@ Settings before running:
                                        discriminator_loss_scale: 0.0, discriminator_gradient_penalty_scale: 0.0, discriminator_weight_decay_scale: 0.0
 
 TRAIN (PHASE 2 - from Phase 1 checkpoint):
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 4096 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\yaw_invariant_first\checkpoints\best_agent.pt
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 4096 --headless --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\yaw_variant_first\checkpoints\best_agent.pt
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
