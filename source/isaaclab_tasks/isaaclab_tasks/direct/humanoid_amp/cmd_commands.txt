@@ -12,7 +12,7 @@ TRAIN (SECOND TRAINING):
 
 
 TENSORBOARD:
-tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk --port 6001
+tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2 --port 6001
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -51,7 +51,7 @@ scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
                         ====================================    HUMANOID PATH INCLUDED AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-17_10-51-53_amp_torch_reduced_amp_obs_first_train\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-21_00-28-00_amp_torch_full_variant_amp_obs_second_train\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Path-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 250
 
 TENSORBOARD:
 tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path --host 127.0.0.1 --port 6001
@@ -115,7 +115,7 @@ scripts\reinforcement_learning\skrl\run_noisy_plane_demo.bat
                         ====================================    HUMANOID NO AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --task Isaac-Humanoid-Direct-v0 --num_envs 1 --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_direct/2026-02-18_10-25-04_ppo_torch/checkpoints/best_agent.pt --headless --video --video_length 300  --algorithm PPO
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --task Isaac-Humanoid-Direct-v0 --num_envs 1 --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_path\2026-04-20_06-21-07_amp_torch_reduced_amp_obs_first_train_78dim\checkpoints\best_agent.pt --headless --video --video_length 300  --algorithm PPO
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-Direct-v0 --num_envs 256 --algorithm PPO --headless 

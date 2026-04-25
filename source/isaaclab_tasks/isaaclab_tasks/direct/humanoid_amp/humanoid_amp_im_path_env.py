@@ -57,12 +57,12 @@ class HumanoidAmpEnv(DirectRLEnv):
         # # --------------------------    Gait Generator System    --------------------------#
 
         self.gaitgen_net = SimpleFCNN()
-        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\FINAL_BEST_MODEL.pth',weights_only=True))
+        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\FINAL_BEST_MODEL.pth',weights_only=True))
         self.gaitgen_net.to(self.sim.device)
         self.gaitgen_net.eval()
 
-        self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\mean.npy")
-        self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\std.npy")
+        self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\mean.npy")
+        self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\std.npy")
 
         self.mean = torch.tensor(self.mean, device=self.sim.device, dtype=torch.float32)
         self.std = torch.tensor(self.std, device=self.sim.device, dtype=torch.float32)
@@ -131,18 +131,18 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.ramp_demo = True
 
         # # --------------------------    Curriculum System    --------------------------#
-        self._curriculum_ang_half_range = 0.5
+        self._curriculum_ang_half_range = 0.4
         self._curriculum_max_half_range = 1.0
         self._curriculum_step = 0.1
-        self._curriculum_threshold = 0.5
-        self._curriculum_N = 45000
+        self._curriculum_threshold = 0.45
+        self._curriculum_N = 60000
         self._curriculum_ep_buf = torch.zeros(self._curriculum_N, device=self.sim.device)
         self._curriculum_ep_write_idx = 0
         self._curriculum_ep_count = 0
         self._yaw_reward_sum = torch.zeros(self.num_envs, device=self.sim.device)
         self._yaw_reward_steps = torch.zeros(self.num_envs, device=self.sim.device)
         self._yaw_vel_weight = 0.8
-        self._yaw_vel_weight_max = 1.5
+        self._yaw_vel_weight_max = 1.4
 
     def set_test_speed(self, fwd_speed: float | None):
         """If speed is not None, all envs will use this fixed speed at reset."""
@@ -271,19 +271,19 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         for i in reversed(range(self.cfg.num_amp_observations - 1)):
             self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
-        ## - Reduced AMP obs - Only include the first 56 dimensions
-        amp_obs = compute_reduced_obs(
-                    self.robot.data.joint_pos,
-                    self.robot.data.joint_vel,
-                    self.robot.data.body_pos_w[:, self.ref_body_index],
-                    self.robot.data.body_quat_w[:, self.ref_body_index],
-                    self.robot.data.body_lin_vel_w[:, self.ref_body_index],
-                    self.robot.data.body_pos_w[:, self.key_body_indexes],
-                )
-        self.amp_observation_buffer[:, 0] = amp_obs.clone()
+        # ## - Reduced AMP obs - Only include the first 56 dimensions
+        # amp_obs = compute_reduced_obs(
+        #             self.robot.data.joint_pos,
+        #             self.robot.data.joint_vel,
+        #             self.robot.data.body_pos_w[:, self.ref_body_index],
+        #             self.robot.data.body_quat_w[:, self.ref_body_index],
+        #             self.robot.data.body_lin_vel_w[:, self.ref_body_index],
+        #             self.robot.data.body_pos_w[:, self.key_body_indexes],
+        #         )
+        # self.amp_observation_buffer[:, 0] = amp_obs.clone()
 
-        # # --- WORLD-FRAME AMP obs ---
-        # self.amp_observation_buffer[:, 0] = obs[:,:81].clone()
+        # --- WORLD-FRAME AMP obs ---
+        self.amp_observation_buffer[:, 0] = obs[:,:81].clone()
 
         self.extras = {"amp_obs": self.amp_observation_buffer.view(-1, self.amp_observation_size)}
 
@@ -313,8 +313,8 @@ class HumanoidAmpEnv(DirectRLEnv):
             imitation_weight_hip_pos  = 0.35 
             imitation_weight_knee_pos = 0.35
             fwd_vel_weight = 0.70
-            yaw_vel_weight = 0.175
-            lat_vel_weight = 0.175
+            yaw_vel_weight = 0.2
+            lat_vel_weight = 0.15
             death_cost = -1.75
 
         env_ids = torch.arange(self.reference.shape[0], device=self.sim.device)
@@ -352,7 +352,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         direction_comp = torch.clamp(
             yaw_speed * torch.sign(self.desired_ang_speeds), min=0.0
         )
-        vel_reward_ang = 0.75 * tracking_comp + 0.25 * torch.tanh(direction_comp)
+        vel_reward_ang = 0.9 * tracking_comp + 0.1 * torch.tanh(direction_comp)
         vel_reward += yaw_vel_weight * vel_reward_ang
 
         if self.cfg.second_training and not self.demo_mode:
@@ -661,26 +661,26 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         
 
-        ## - Reduced AMP obs - Only include the first 60 dimensions
-        amp_observation = compute_reduced_obs(
-            dof_positions[:, self.motion_dof_indexes],
-            dof_velocities[:, self.motion_dof_indexes],
-            body_positions[:, self.motion_ref_body_index],
-            body_rotations[:, self.motion_ref_body_index],
-            body_linear_velocities[:, self.motion_ref_body_index],
-            body_positions[:, self.motion_key_body_indexes],
-        )
-
-        # # --- WORLD-FRAME AMP obs ---
-        # amp_observation = compute_obs(
+        # ## - Reduced AMP obs - Only include the first 78 dimensions
+        # amp_observation = compute_reduced_obs(
         #     dof_positions[:, self.motion_dof_indexes],
         #     dof_velocities[:, self.motion_dof_indexes],
         #     body_positions[:, self.motion_ref_body_index],
         #     body_rotations[:, self.motion_ref_body_index],
         #     body_linear_velocities[:, self.motion_ref_body_index],
-        #     body_angular_velocities[:, self.motion_ref_body_index],
         #     body_positions[:, self.motion_key_body_indexes],
         # )
+
+        # --- WORLD-FRAME AMP obs ---
+        amp_observation = compute_obs(
+            dof_positions[:, self.motion_dof_indexes],
+            dof_velocities[:, self.motion_dof_indexes],
+            body_positions[:, self.motion_ref_body_index],
+            body_rotations[:, self.motion_ref_body_index],
+            body_linear_velocities[:, self.motion_ref_body_index],
+            body_angular_velocities[:, self.motion_ref_body_index],
+            body_positions[:, self.motion_key_body_indexes],
+        )
 
         return amp_observation.view(-1, self.amp_observation_size)
 
@@ -834,9 +834,9 @@ def compute_reduced_obs(
             dof_positions,
             dof_velocities,
             root_positions[:, 2:3],  # root body height only
-            # quaternion_to_tangent_and_normal(root_rotations),
+            quaternion_to_tangent_and_normal(root_rotations),
             root_linear_velocities,
-            # (key_body_positions - root_positions.unsqueeze(-2)).view(key_body_positions.shape[0], -1),
+            (key_body_positions - root_positions.unsqueeze(-2)).view(key_body_positions.shape[0], -1),
         ),
         dim=-1,
     )
