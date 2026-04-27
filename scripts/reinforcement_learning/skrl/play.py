@@ -132,8 +132,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     train_task_name = task_name.replace("-Play", "")
 
     demo_mode = "vel"
-    desired_speed = 1.5
-    desired_ang_speed = 1.5
+    desired_speed = 2.4
+    desired_ang_speed = 0.0
     
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -187,7 +187,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     
     env.unwrapped.set_test_speed(desired_speed)
-    env.unwrapped.set_test_ang_speed(desired_ang_speed)
+    # env.unwrapped.set_test_ang_speed(desired_ang_speed)
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
         env = multi_agent_to_single_agent(env)

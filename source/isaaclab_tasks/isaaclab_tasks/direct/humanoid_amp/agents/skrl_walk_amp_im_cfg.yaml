@@ -103,7 +103,7 @@ agent:
   # logging and checkpoint
   experiment:
     directory: "humanoid_amp_im_walk_v2"
-    experiment_name: "no_curriculum_no_decay_entcoeff"
+    experiment_name: "no_curriculum_no_decay_entcoeff_oldgaitgen_rewardupdated"
     write_interval: auto
     checkpoint_interval: auto
 
@@ -120,3 +120,4 @@ trainer:
 # Imitation Decay
 # ent coeff
 # If residual gait gen
+# current setups are runned with old gaitgen as its superior to new one.

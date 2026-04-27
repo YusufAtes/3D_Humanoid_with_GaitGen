@@ -2,7 +2,7 @@
                         ====================================    HUMANOID AMP CODES  ====================================
 
 TEST:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint c:/Users/bates/IsaacLab/logs/skrl/humanoid_amp_im_walk/2026-04-06_14-53-41_amp_torch/checkpoints/best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\play.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2\2026-04-26_11-06-04_amp_torch_no_curriculum_no_decay_entcoeff_oldgaitgen_rewardupdated\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless --video --video_length 300
 
 TRAIN:
 ./isaaclab.bat -p scripts\reinforcement_learning\skrl\train.py --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 4096 --headless 
@@ -18,7 +18,7 @@ tensorboard --logdir C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2 -
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Velocity Comparison Demo Code:
-./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk\2026-03-06_23-53-26_amp_torch\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless
+./isaaclab.bat -p scripts\reinforcement_learning\skrl\vel_com_demo.py --checkpoint C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2\2026-04-24_20-59-32_amp_torch_no_curriculum_no_decay_entcoeff\checkpoints\best_agent.pt --task Isaac-Humanoid-AMP-Imp-Direct-v0 --num_envs 1 --algorithm AMP --headless
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

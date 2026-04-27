@@ -56,13 +56,21 @@ class HumanoidAmpEnv(DirectRLEnv):
 
         # # --------------------------    Gait Generator System    --------------------------#
 
+        # self.gaitgen_net = SimpleFCNN()
+        # self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\FINAL_BEST_MODEL.pth',weights_only=True))
+        # self.gaitgen_net.to(self.sim.device)
+        # self.gaitgen_net.eval()
+
+        # self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\mean.npy")
+        # self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\std.npy")
+
         self.gaitgen_net = SimpleFCNN()
-        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\FINAL_BEST_MODEL.pth',weights_only=True))
+        self.gaitgen_net.load_state_dict(torch.load(rf'C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\locomotion\FINAL_BEST_MODEL.pth',weights_only=True))
         self.gaitgen_net.to(self.sim.device)
         self.gaitgen_net.eval()
 
-        self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\mean.npy")
-        self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\std.npy")
+        self.mean = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\mean.npy")
+        self.std = np.load(r"C:\Users\bates\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\direct\humanoid_amp\gait reference phase 2\std.npy")
 
         self.mean = torch.tensor(self.mean, device=self.sim.device, dtype=torch.float32)
         self.std = torch.tensor(self.std, device=self.sim.device, dtype=torch.float32)
@@ -259,8 +267,8 @@ class HumanoidAmpEnv(DirectRLEnv):
         # imitation_coeff = torch.where(self.desired_fwd_speeds > decay_factor, imitation_coeff * torch.exp( -1.0 *  (self.desired_fwd_speeds - decay_factor)), imitation_coeff)
 
         # First training: straight walking only, no yaw tracking.
-        imitation_weight_hip_pos  = 0.35 
-        imitation_weight_knee_pos = 0.35
+        imitation_weight_hip_pos  = 0.375 
+        imitation_weight_knee_pos = 0.375
         fwd_vel_weight = 0.70
         yaw_vel_weight = 0.15
         lat_vel_weight = 0.15
@@ -296,9 +304,9 @@ class HumanoidAmpEnv(DirectRLEnv):
         vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
         vel_reward = fwd_vel_weight * vel_reward_fwd
 
-        vel_reward += yaw_vel_weight * torch.exp(-3.0 * torch.abs(yaw_speed))
+        vel_reward += yaw_vel_weight * torch.exp(-4.0 * torch.abs(yaw_speed))
 
-        lat_vel_reward = lat_vel_weight * torch.exp(-3.0 * torch.abs(lateral_speed))
+        lat_vel_reward = lat_vel_weight * torch.exp(-4.0 * torch.abs(lateral_speed))
         vel_reward += lat_vel_reward
 
         total_reward +=  imitation_reward + vel_reward
