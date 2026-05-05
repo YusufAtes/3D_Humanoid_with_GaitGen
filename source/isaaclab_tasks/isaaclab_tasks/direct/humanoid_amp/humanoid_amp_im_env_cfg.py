@@ -70,9 +70,14 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     termination_height = 0.7
     
     # NEW: Added this field to control slope at spawn time
-    demo_mode: bool= False
-    demo_type: str= "vel"   #Possible choices are vel, ramp, and noise
+    demo_mode: bool= True
+    demo_type: str= "noise"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
+
+    # Forward-speed curriculum: when enabled, the upper bound of the sampled
+    # reference forward speed grows from 1.2 m/s up to 2.4 m/s as the policy
+    # consistently tracks the current range well.
+    curriculum_on: bool = False
 
     # Noisy plane demo settings
     noise_amplitude: float = 0.05  # Max height perturbation (meters) for noisy plane demo

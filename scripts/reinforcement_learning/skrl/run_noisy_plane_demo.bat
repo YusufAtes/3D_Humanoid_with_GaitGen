@@ -7,10 +7,10 @@ REM ==================================================================
 setlocal enabledelayedexpansion
 
 REM --- Configurable parameters (edit as needed) ---------------------
-set CHECKPOINT=c:/Users/bates/IsaacLab/logs/skrl/humanoid_direct/2026-02-18_10-25-04_ppo_torch/checkpoints/best_agent.pt
-set TASK=Isaac-Humanoid-Direct-v0
+set CHECKPOINT=C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2\2026-04-27_20-16-13_amp_torch_no_curriculum_no_decay_noAMP_noImitation\checkpoints\best_agent.pt
+set TASK=Isaac-Humanoid-AMP-Imp-Direct-v0
 set NUM_ENVS=1
-set ALGORITHM=PPO
+set ALGORITHM=AMP
 REM ------------------------------------------------------------------
 
 echo ==================================================================

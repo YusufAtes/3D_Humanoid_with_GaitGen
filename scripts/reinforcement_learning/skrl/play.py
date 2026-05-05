@@ -132,7 +132,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     train_task_name = task_name.replace("-Play", "")
 
     demo_mode = "vel"
-    desired_speed = 2.4
+    desired_speed = 1.8
     desired_ang_speed = 0.0
     
     # override configurations with non-hydra CLI arguments

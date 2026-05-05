@@ -1,9 +1,15 @@
 """
 Plot desired vs actual speed for humanoid_amp_im_walk configs.
 
-For each config folder, the script reads all `speed_results*.csv` files,
-computes the per-file MSE between `desired_speed` and `actual_speed`, then
-averages the curves across files and reports the average MSE in the legend.
+The script takes a folder path as input, walks every immediate subfolder,
+locates the `speed_results.csv` file inside each one and produces a single
+velocity figure containing every configuration found. Each curve is labeled
+with its folder name (with the prefix up to and including ``torch_`` stripped).
+
+For each configuration the script also prints the average MSE between
+``desired_speed`` and ``actual_speed`` and reports whether any trial inside the
+configuration failed. The summary is mirrored to a ``.txt`` file next to the
+output figure.
 """
 
 from __future__ import annotations
@@ -16,8 +22,22 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def _read_speed_results(csv_path: Path) -> tuple[pd.DataFrame, float]:
-    """Return (curve_df, mse) where curve_df has columns: desired_speed, actual_speed."""
+def _legend_from_folder(folder_name: str) -> str:
+    """Strip everything up to and including the first ``torch_`` token."""
+    marker = "torch_"
+    idx = folder_name.find(marker)
+    if idx == -1:
+        return folder_name
+    return folder_name[idx + len(marker):]
+
+
+def _read_speed_results(csv_path: Path) -> tuple[pd.DataFrame, float, bool, int]:
+    """Return (curve_df, mse, any_failed, num_failed).
+
+    ``curve_df`` only contains successful rows; ``mse`` is computed across the
+    successful rows. A trial is considered failed when its ``success`` column
+    is ``False`` (or ``actual_speed`` is NaN when the column is missing).
+    """
     df = pd.read_csv(csv_path)
 
     required = {"desired_speed", "actual_speed"}
@@ -25,30 +45,57 @@ def _read_speed_results(csv_path: Path) -> tuple[pd.DataFrame, float]:
     if missing:
         raise ValueError(f"{csv_path}: missing required columns: {sorted(missing)}")
 
-    # If multiple rows share the same desired_speed, average actual_speed for stability.
-    # (Uses rounding to avoid float representation mismatch.)
     df = df.copy()
     df["desired_speed"] = np.round(df["desired_speed"].astype(float), 6)
-    df["actual_speed"] = df["actual_speed"].astype(float)
-    curve = df.groupby("desired_speed", as_index=False)["actual_speed"].mean()
+    df["actual_speed"] = pd.to_numeric(df["actual_speed"], errors="coerce")
 
-    mse = np.mean((curve["desired_speed"].to_numpy() - curve["actual_speed"].to_numpy()) ** 2)
-    return curve, float(mse)
+    if "success" in df.columns:
+        success_mask = df["success"].astype(str).str.lower().isin({"true", "1", "1.0"})
+    else:
+        success_mask = df["actual_speed"].notna()
+
+    num_failed = int((~success_mask).sum())
+    any_failed = num_failed > 0
+
+    success_df = df[success_mask & df["actual_speed"].notna()]
+    curve = success_df.groupby("desired_speed", as_index=False)["actual_speed"].mean()
+    curve = curve.sort_values("desired_speed").reset_index(drop=True)
+
+    if curve.empty:
+        mse = float("nan")
+    else:
+        diffs = curve["desired_speed"].to_numpy() - curve["actual_speed"].to_numpy()
+        mse = float(np.mean(diffs ** 2))
+
+    return curve, mse, any_failed, num_failed
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--root",
+        "root",
         type=Path,
-        default=Path("logs/skrl/humanoid_amp_im_walk"),
-        help="Root folder containing config subfolders.",
+        nargs="?",
+        default=Path("logs/skrl/humanoid_amp_im_walk_v2"),
+        help="Root folder containing config subfolders (one speed_results.csv per subfolder).",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("logs/skrl/humanoid_amp_im_walk/combined_speed_desired_vs_actual_alpha_mse.png"),
-        help="Output PNG path.",
+        default=None,
+        help="Output PNG path. Defaults to '<root>/combined_speed_desired_vs_actual.png'.",
+    )
+    parser.add_argument(
+        "--summary",
+        type=Path,
+        default=None,
+        help="Output TXT summary path. Defaults to '<root>/speed_results_summary.txt'.",
+    )
+    parser.add_argument(
+        "--csv-name",
+        type=str,
+        default="speed_results.csv",
+        help="Name of the CSV file expected inside each subfolder.",
     )
     parser.add_argument(
         "--show",
@@ -61,100 +108,115 @@ def main() -> None:
     if not root_dir.exists():
         raise FileNotFoundError(f"Root folder does not exist: {root_dir}")
 
-    configs: list[tuple[str, str]] = [
-        ("05_imitation_abs_diff_entcoeff", r"$\alpha = 0.5$"),
-        ("075_imitation_abs_diff_entcoeff", r"$\alpha = 0.25$"),
-        (
-            "05_imitation_abs_diff_ent_imweightboosted",
-            r"$\alpha = 0.5$ weight boost",
-        ),
-        ("no_imitation_abs_diff", "imitasyon azaltmasız"),
-        ("no_imitation_reward_result", "AMP"),
-    ]
+    output_path: Path = args.output or (root_dir / "combined_speed_desired_vs_actual.png")
+    summary_path: Path = args.summary or (root_dir / "speed_results_summary.txt")
 
-    per_config_curves: dict[str, dict[str, object]] = {}
-    global_min_speed = None
-    global_max_speed = None
+    subfolders = sorted(p for p in root_dir.iterdir() if p.is_dir())
 
-    for folder_name, legend_base in configs:
-        config_dir = root_dir / folder_name
-        if not config_dir.exists():
-            raise FileNotFoundError(f"Missing config folder: {config_dir}")
+    per_config: list[dict[str, object]] = []
+    global_min_speed: float | None = None
+    global_max_speed: float | None = None
 
-        csv_files = sorted(config_dir.glob("speed_results*.csv"))
-        if not csv_files:
-            raise FileNotFoundError(f"No speed_results*.csv found in: {config_dir}")
+    for config_dir in subfolders:
+        csv_path = config_dir / args.csv_name
+        if not csv_path.exists():
+            continue
 
-        curves: list[pd.DataFrame] = []
-        mses: list[float] = []
-        for csv_path in csv_files:
-            curve_df, mse = _read_speed_results(csv_path)
-            curves.append(curve_df)
-            mses.append(mse)
+        curve, mse, any_failed, num_failed = _read_speed_results(csv_path)
+        if curve.empty:
+            print(f"Skipping {config_dir.name}: no successful rows in {csv_path.name}")
+            continue
 
-        all_points = pd.concat(curves, ignore_index=True)
-        mean_curve = (
-            all_points.groupby("desired_speed", as_index=False)["actual_speed"].mean().sort_values("desired_speed")
+        per_config.append(
+            {
+                "folder": config_dir.name,
+                "legend": _legend_from_folder(config_dir.name),
+                "curve": curve,
+                "mse": mse,
+                "any_failed": any_failed,
+                "num_failed": num_failed,
+            }
         )
-        avg_mse = float(np.mean(mses))
 
-        per_config_curves[folder_name] = {
-            "legend_base": legend_base,
-            "mean_curve": mean_curve,
-            "avg_mse": avg_mse,
-        }
+        cmin = float(curve["desired_speed"].min())
+        cmax = float(curve["desired_speed"].max())
+        global_min_speed = cmin if global_min_speed is None else min(global_min_speed, cmin)
+        global_max_speed = cmax if global_max_speed is None else max(global_max_speed, cmax)
 
-        min_speed = float(mean_curve["desired_speed"].min())
-        max_speed = float(mean_curve["desired_speed"].max())
-        global_min_speed = min_speed if global_min_speed is None else min(global_min_speed, min_speed)
-        global_max_speed = max_speed if global_max_speed is None else max(global_max_speed, max_speed)
+    if not per_config:
+        raise FileNotFoundError(
+            f"No '{args.csv_name}' files found in immediate subfolders of: {root_dir}"
+        )
 
     assert global_min_speed is not None and global_max_speed is not None
 
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(11, 8))
 
-    # Plot each config curve with avg MSE in legend.
-    for folder_name, _legend_base in configs:
-        entry = per_config_curves[folder_name]
-        mean_curve = entry["mean_curve"]  # type: ignore[assignment]
-        avg_mse = entry["avg_mse"]  # type: ignore[assignment]
-        legend_base = entry["legend_base"]  # type: ignore[assignment]
+    for entry in per_config:
+        curve = entry["curve"]  # type: ignore[assignment]
+        legend = entry["legend"]  # type: ignore[assignment]
+        mse = entry["mse"]  # type: ignore[assignment]
+        any_failed = entry["any_failed"]  # type: ignore[assignment]
 
-        label = f"{legend_base} (mse = {avg_mse:.6f})"
+        fail_tag = " [FAILED]" if any_failed else ""
+        label = f"{legend} (mse = {mse:.6f}){fail_tag}"
         plt.plot(
-            mean_curve["desired_speed"],
-            mean_curve["actual_speed"],
+            curve["desired_speed"],
+            curve["actual_speed"],
             marker="o",
             linewidth=2,
             markersize=4,
             label=label,
         )
 
-    # Reference diagonal: desired_speed == actual_speed
     plt.plot(
         [global_min_speed, global_max_speed],
         [global_min_speed, global_max_speed],
         "k--",
         linewidth=2,
         alpha=0.8,
-        label="İdeal (istenilen = gerçek)",
+        label="Ideal (desired = actual)",
     )
 
-    plt.xlabel("İstenilen hız")
-    plt.ylabel("Gerçek hız")
+    plt.xlabel("Desired speed")
+    plt.ylabel("Actual speed")
+    plt.title("Desired vs. actual speed across configurations")
     plt.grid(True, alpha=0.3)
     plt.legend(loc="best", fontsize=9)
     plt.tight_layout()
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(args.output, dpi=300, bbox_inches="tight")
-    print(f"Plot saved to: {args.output}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"Plot saved to: {output_path}")
 
-    # Print MSE summary for quick checking.
-    for folder_name, legend_base in configs:
-        avg_mse = per_config_curves[folder_name]["avg_mse"]  # type: ignore[index]
-        # Use folder_name to avoid Windows console encoding issues with Turkish characters.
-        print(f"{folder_name}: mse = {avg_mse:.6f}")
+    legend_width = max((len(str(e["legend"])) for e in per_config), default=10)
+    legend_width = max(legend_width, len("config"))
+
+    header = f"{'config'.ljust(legend_width)}  {'avg_mse':>12}  {'failed':>7}  {'num_failed':>10}"
+    separator = "-" * len(header)
+
+    summary_lines: list[str] = [
+        f"Root: {root_dir}",
+        f"Found {len(per_config)} configurations.",
+        "",
+        header,
+        separator,
+    ]
+    for entry in per_config:
+        legend = str(entry["legend"]).ljust(legend_width)
+        mse = float(entry["mse"])  # type: ignore[arg-type]
+        failed_str = "yes" if entry["any_failed"] else "no"
+        num_failed = int(entry["num_failed"])  # type: ignore[arg-type]
+        summary_lines.append(f"{legend}  {mse:12.6f}  {failed_str:>7}  {num_failed:>10}")
+
+    summary_text = "\n".join(summary_lines)
+    print()
+    print(summary_text)
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(summary_text + "\n", encoding="utf-8")
+    print()
+    print(f"Summary saved to: {summary_path}")
 
     if args.show:
         plt.show()
@@ -162,4 +224,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

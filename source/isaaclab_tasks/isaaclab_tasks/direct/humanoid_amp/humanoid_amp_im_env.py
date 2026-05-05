@@ -126,21 +126,24 @@ class HumanoidAmpEnv(DirectRLEnv):
         if self.test_slope_deg != 0:
             self.ramp_demo = True
 
-        ## NOTE FOR AI AGENT THE FOLLOWING CURRICULUM SYSTEM WAS ORIGINALLY IMPLEMENTED FOR TURNING BEHAVIOR. IT IS NOT USED IN THIS ENVIRONMENT. BUT IT IS LEFT FROR REFERENCE FOR FUTURE FORWARD
-        ## SPEED CURRICULUM IMPLEMENTATION.
-        # # --------------------------    Curriculum System    --------------------------#
-        self._curriculum_ang_half_range = 0.4
-        self._curriculum_max_half_range = 1.0
-        self._curriculum_step = 0.1
-        self._curriculum_threshold = 0.45
+        # # --------------------------    Curriculum System (Forward Speed)    --------------------------#
+        # When self.cfg.curriculum_on is True, the upper bound of the sampled
+        # reference forward speed (in m/s, before /2.4 normalization) starts at
+        # _curriculum_fwd_max_speed and grows by _curriculum_step every time the
+        # mean of vel_reward_fwd over the last _curriculum_N finished episodes
+        # exceeds _curriculum_threshold. The forward velocity tracking weight
+        # itself is NOT increased.
+        self.curriculum_on = self.cfg.curriculum_on
+        self._curriculum_fwd_max_speed = 1.2
+        self._curriculum_max_fwd_max_speed = 2.4
+        self._curriculum_step = 0.2
+        self._curriculum_threshold = 0.65
         self._curriculum_N = 60000
         self._curriculum_ep_buf = torch.zeros(self._curriculum_N, device=self.sim.device)
         self._curriculum_ep_write_idx = 0
         self._curriculum_ep_count = 0
-        self._yaw_reward_sum = torch.zeros(self.num_envs, device=self.sim.device)
-        self._yaw_reward_steps = torch.zeros(self.num_envs, device=self.sim.device)
-        self._yaw_vel_weight = 0.8
-        self._yaw_vel_weight_max = 1.4
+        self._fwd_reward_sum = torch.zeros(self.num_envs, device=self.sim.device)
+        self._fwd_reward_steps = torch.zeros(self.num_envs, device=self.sim.device)
 
     def set_test_speed(self, fwd_speed: float | None):
         """If speed is not None, all envs will use this fixed speed at reset."""
@@ -262,14 +265,14 @@ class HumanoidAmpEnv(DirectRLEnv):
         total_reward = torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
         imitation_reward =  torch.zeros((self.num_envs,), dtype=torch.float32, device=self.sim.device)
 
-        # decay_factor = 0.75
-        # imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
-        # imitation_coeff = torch.where(self.desired_fwd_speeds > decay_factor, imitation_coeff * torch.exp( -1.0 *  (self.desired_fwd_speeds - decay_factor)), imitation_coeff)
+        decay_factor = 1.0
+        imitation_coeff = torch.ones((self.num_envs,), dtype=torch.float32, device=self.sim.device)
+        imitation_coeff = torch.where(self.desired_fwd_speeds > decay_factor, imitation_coeff * torch.exp( -1.0 *  (self.desired_fwd_speeds - decay_factor)), imitation_coeff)
 
         # First training: straight walking only, no yaw tracking.
-        imitation_weight_hip_pos  = 0.375 
-        imitation_weight_knee_pos = 0.375
-        fwd_vel_weight = 0.70
+        imitation_weight_hip_pos  =  0.35 * imitation_coeff
+        imitation_weight_knee_pos =  0.35 * imitation_coeff
+        fwd_vel_weight = 0.70 * (1 / imitation_coeff)
         yaw_vel_weight = 0.15
         lat_vel_weight = 0.15
         death_cost = -1.75
@@ -302,7 +305,13 @@ class HumanoidAmpEnv(DirectRLEnv):
         yaw_speed = vel_ang[:, 2]   # yaw (w)
 
         vel_reward_fwd = torch.exp(-4.0 * torch.abs(forward_speed - (self.desired_fwd_speeds * 2.4)))
+        self.vel_reward_fwd = vel_reward_fwd
         vel_reward = fwd_vel_weight * vel_reward_fwd
+
+        # Accumulate forward-tracking reward per env across the episode for the curriculum.
+        if self.curriculum_on and not self.demo_mode:
+            self._fwd_reward_sum += vel_reward_fwd
+            self._fwd_reward_steps += 1
 
         vel_reward += yaw_vel_weight * torch.exp(-4.0 * torch.abs(yaw_speed))
 
@@ -405,9 +414,55 @@ class HumanoidAmpEnv(DirectRLEnv):
 
             else:
                 # -------------------------- VECTORIZED RL RESET -------------------------- #
+
+                # --- Curriculum: record finished episodes & update fwd-speed range ---
+                if self.curriculum_on:
+                    valid = self._fwd_reward_steps[env_ids] > 0
+                    if valid.any():
+                        ep_means = (self._fwd_reward_sum[env_ids[valid]]
+                                    / self._fwd_reward_steps[env_ids[valid]])
+                        n_new = ep_means.shape[0]
+                        for i in range(n_new):
+                            idx = self._curriculum_ep_write_idx % self._curriculum_N
+                            self._curriculum_ep_buf[idx] = ep_means[i]
+                            self._curriculum_ep_write_idx += 1
+                        self._curriculum_ep_count = min(
+                            self._curriculum_ep_count + n_new, self._curriculum_N
+                        )
+                        if self._curriculum_ep_count >= self._curriculum_N:
+                            buf_mean = self._curriculum_ep_buf.mean().item()
+                            if (buf_mean > self._curriculum_threshold
+                                    and self._curriculum_fwd_max_speed < self._curriculum_max_fwd_max_speed):
+                                old_r = self._curriculum_fwd_max_speed
+                                self._curriculum_fwd_max_speed = min(
+                                    old_r + self._curriculum_step,
+                                    self._curriculum_max_fwd_max_speed,
+                                )
+                                print(f"[CURRICULUM] Mean fwd-vel reward {buf_mean:.3f} > "
+                                      f"{self._curriculum_threshold} threshold")
+                                print(f"[CURRICULUM] Forward speed range expanded: "
+                                      f"[0.1, {old_r:.1f}] -> [0.1, {self._curriculum_fwd_max_speed:.1f}] m/s")
+                            else:
+                                print(f"[CURRICULUM] Threshold not met (mean={buf_mean:.3f}). "
+                                      f"Keeping range [0.1, {self._curriculum_fwd_max_speed:.1f}] m/s")
+                            self._curriculum_ep_count = 0
+                            self._curriculum_ep_write_idx = 0
+                    self._fwd_reward_sum[env_ids] = 0
+                    self._fwd_reward_steps[env_ids] = 0
+
                 # 1. Sample random values for the entire batch
-                # PyTorch rand generates [0, 1). We scale it to [0.1, 2.4)
-                reference_fwd_speed = (torch.rand(num_reset, device=device) * 2.3 + 0.1) / 2.4
+                # PyTorch rand generates [0, 1). When the curriculum is on we sample
+                # raw speeds in [0.1, _curriculum_fwd_max_speed] m/s; otherwise the
+                # original [0.1, 2.4] m/s range. The desired speed is then divided
+                # by 2.4 to match the normalized scale used by the policy.
+                if self.curriculum_on:
+                    raw_max = self._curriculum_fwd_max_speed
+                    raw_min = 0.1
+                    reference_fwd_speed = (
+                        torch.rand(num_reset, device=device) * (raw_max - raw_min) + raw_min
+                    ) / 2.4
+                else:
+                    reference_fwd_speed = (torch.rand(num_reset, device=device) * 2.3 + 0.1) / 2.4
                 
                 # int(3/self.dt) bounds
                 max_idx = int(3 / self.dt)
