@@ -44,7 +44,8 @@ NOISY_TERRAIN_CFG = TerrainGeneratorCfg(
         "random_rough": HfRandomUniformTerrainCfg(
             proportion=1.0,
             noise_range=(-0.05, 0.05),  # overridden by noise_amplitude at runtime
-            noise_step=0.005,
+            noise_step=0.005,           # required by IsaacLab; kept fixed
+            downsampled_scale=None,     # None -> uses horizontal_scale (default smoothness)
             border_width=0.25,
         ),
     },
@@ -77,12 +78,14 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     # Forward-speed curriculum: when enabled, the upper bound of the sampled
     # reference forward speed grows from 1.2 m/s up to 2.4 m/s as the policy
     # consistently tracks the current range well.
-    curriculum_on: bool = False
+    curriculum_on: bool = True
 
     # Noisy plane demo settings
-    noise_amplitude: float = 0.05  # Max height perturbation (meters) for noisy plane demo
-    noise_seed: int = 42           # Seed for reproducible noise pattern across trials
-    noise_type: str = "random"     # "random" or "wave"
+    noise_amplitude: float = 0.05
+    noise_seed: int = 42
+    noise_type: str = "random"          # "random" or "wave"
+    noise_step: float = 0.005           # required by random terrain; keep fixed
+    downsampled_scale: float | None = None  # random only; None uses default horizontal_scale
     
     # Noisy terrain (used when demo_type == "noise")
     terrain: TerrainImporterCfg = TerrainImporterCfg(

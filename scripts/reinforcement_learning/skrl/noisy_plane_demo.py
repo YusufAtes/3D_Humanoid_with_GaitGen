@@ -4,10 +4,9 @@
 """
 Script to evaluate an RL agent on a noisy ground plane.
 
-For each noise amplitude (set via --noise_amplitude), the script iterates
-over a range of desired speeds, logs actual speed / reward / success, and
-saves results to a CSV file + plot — identical workflow to ramp_demo.py but
-with terrain noise instead of a slope angle.
+For each (noise_type, noise_seed, downsampled_scale, noise_amplitude) tuple, the
+script iterates over a range of desired speeds and logs actual speed /
+reward / success to a CSV file. Results are averaged across seeds offline.
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -54,6 +53,19 @@ parser.add_argument(
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--noise_amplitude", type=float, default=0.0, help="Max height perturbation (metres) for the noisy plane.")
 parser.add_argument("--noise_type", type=str, default="random", choices=["random", "wave"], help="Type of noisy terrain: 'random' or 'wave'.")
+parser.add_argument("--noise_seed", type=int, default=42, help="Seed for reproducible heightfield realization.")
+parser.add_argument(
+    "--downsampled_scale",
+    type=float,
+    default=None,
+    help="Distance between random samples for random terrain (m). None uses terrain default.",
+)
+parser.add_argument(
+    "--noise_step",
+    type=float,
+    default=None,
+    help="Deprecated alias for downsampled_scale. Ignored if --downsampled_scale is provided.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -130,12 +142,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     task_name = args_cli.task.split(":")[-1]
     train_task_name = task_name.replace("-Play", "")
     noise_amplitude = args_cli.noise_amplitude
+    noise_seed = args_cli.noise_seed
+    downsampled_scale = args_cli.downsampled_scale
+    if downsampled_scale is None:
+        downsampled_scale = args_cli.noise_step
 
     # ---------- configure env for noisy-plane demo ----------
     env_cfg.demo_type = "noise"
     env_cfg.noise_amplitude = noise_amplitude
     env_cfg.noise_type = args_cli.noise_type
-    # noise_seed stays at config default (42) → same pattern every trial
+    env_cfg.noise_seed = noise_seed
+    env_cfg.downsampled_scale = downsampled_scale
     env_cfg.test_slope_deg = 0.0          # flat base — noise only
     env_cfg.episode_length_s = 5
     env_cfg.termination_height = 0.55
@@ -183,12 +200,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # ---------------------------
     speed_schedule = np.linspace(0.2, 2.4, 23)  # same schedule as ramp demo
     episode_current_vel = []
-    results_data = []  # Store (desired_speed, actual_speed, reward, noise_amplitude, success)
+    results_data = []  # rows for CSV
 
     # Keep these constant across runs
     experiment_cfg["trainer"]["close_environment_at_exit"] = False
     experiment_cfg["agent"]["experiment"]["write_interval"] = 0
     experiment_cfg["agent"]["experiment"]["checkpoint_interval"] = 0
+
+    # downsampled_scale is meaningful only for 'random'; record NaN for 'wave'
+    logged_downsampled_scale = downsampled_scale if args_cli.noise_type == "random" else float("nan")
 
     # ---------------------------
     # CREATE ENV ONCE
@@ -270,88 +290,58 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             demo_step = int(wrapped_env.unwrapped.episode_length_buf.item())
             if demo_step == 148:
                 avg_speed = wrapped_env.unwrapped.avg_speed
-                print(f"Noise Amplitude: {noise_amplitude}, Desired Speed: {desired_speed}, Actual Speed: {avg_speed}, Success: {True}")
+                print(f"type={args_cli.noise_type} seed={noise_seed} downsampled_scale={logged_downsampled_scale} "
+                      f"amp={noise_amplitude} desired={desired_speed:.2f} actual={avg_speed:.3f} success=True")
                 print("------------------------------------------------------------")
                 episode_current_vel.append(avg_speed)
                 results_data.append({
                     'desired_speed': desired_speed,
                     'actual_speed': avg_speed,
                     'reward': reward_sum,
+                    'x_pos': wrapped_env.unwrapped.x_pos,
                     'noise_amplitude': noise_amplitude,
                     'noise_type': args_cli.noise_type,
+                    'noise_seed': noise_seed,
+                    'downsampled_scale': logged_downsampled_scale,
                     'success': True,
                 })
                 break
 
             if done == True:
                 avg_speed = wrapped_env.unwrapped.avg_speed
-                print(f"Noise Amplitude: {noise_amplitude}, Desired Speed: {desired_speed}, Actual Speed: {avg_speed}, Success: {False}")
+                print(f"type={args_cli.noise_type} seed={noise_seed} downsampled_scale={logged_downsampled_scale} "
+                      f"amp={noise_amplitude} desired={desired_speed:.2f} actual={avg_speed:.3f} success=False")
                 print("------------------------------------------------------------")
                 episode_current_vel.append(avg_speed)
                 results_data.append({
                     'desired_speed': desired_speed,
                     'actual_speed': avg_speed,
+                    'x_pos': wrapped_env.unwrapped.x_pos,
                     'reward': reward_sum,
                     'noise_amplitude': noise_amplitude,
                     'noise_type': args_cli.noise_type,
+                    'noise_seed': noise_seed,
+                    'downsampled_scale': logged_downsampled_scale,
                     'success': False,
                 })
                 break
 
     print("[INFO] Finished all speeds.")
-    print(f"Time taken for noise_amplitude {noise_amplitude} is: {time.time() - t0} seconds")
+    print(f"Time taken for type={args_cli.noise_type} seed={noise_seed} downsampled_scale={logged_downsampled_scale} "
+          f"amp={noise_amplitude}: {time.time() - t0:.1f} s")
 
     # Save results to CSV file (append mode — write header only if file is new)
     csv_file_path = os.path.join(log_dir, "noisy_plane_demo_results.csv")
     file_exists = os.path.isfile(csv_file_path)
     with open(csv_file_path, 'a', newline='') as csvfile:
-        fieldnames = ['desired_speed', 'actual_speed', 'reward', 'noise_amplitude', 'noise_type', 'success']
+        fieldnames = ['desired_speed', 'actual_speed', 'reward', 'x_pos',
+                      'noise_amplitude', 'noise_type', 'noise_seed', 'downsampled_scale', 'success']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         if not file_exists:
             writer.writeheader()
         writer.writerows(results_data)
 
     print(f"[INFO] Results saved to: {csv_file_path}")
-
-    # Load CSV to get all data (may include both noise types from previous runs)
-    if os.path.exists(csv_file_path):
-        df = pd.read_csv(csv_file_path)
-    else:
-        df = pd.DataFrame(results_data)
-
-    # Create separate plots for each noise type
-    noise_types = sorted(df["noise_type"].unique()) if "noise_type" in df.columns else [args_cli.noise_type]
-
-    for ntype in noise_types:
-        # Filter data for this noise type
-        if "noise_type" in df.columns:
-            type_data = df[df["noise_type"] == ntype]
-        else:
-            # Fallback: use current run's data if CSV doesn't have noise_type column
-            type_data = pd.DataFrame(results_data) if ntype == args_cli.noise_type else pd.DataFrame()
-
-        if len(type_data) == 0:
-            print(f"[WARN] No data found for noise_type='{ntype}', skipping plot.")
-            continue
-
-        desired_speeds = type_data['desired_speed'].values
-        actual_speeds = type_data['actual_speed'].values
-
-        # plt.figure(figsize=(10, 8))
-        # plt.plot(desired_speeds, actual_speeds, 'o-', label='configuration', linewidth=2, markersize=6)
-        # plt.plot(desired_speeds, desired_speeds, '--', label='desired velocity', linewidth=2, alpha=0.7)
-        # plt.xlabel('Desired Speed', fontsize=12)
-        # plt.ylabel('Speed', fontsize=12)
-        # plt.title(f'Desired Speed vs Actual Speed — {ntype.capitalize()} Noise', fontsize=14)
-        # plt.legend(fontsize=11)
-        # plt.grid(True, alpha=0.3)
-        # plt.tight_layout()
-
-        # # Save plot with noise type in filename
-        # plot_file_path = os.path.join(log_dir, f"noisy_plane_speed_comparison_plot_{ntype}.png")
-        # plt.savefig(plot_file_path, dpi=300, bbox_inches='tight')
-        # print(f"[INFO] Plot saved to: {plot_file_path}")
-        # plt.close()
 
     env.close()
 
@@ -361,4 +351,3 @@ if __name__ == "__main__":
     print("Closing simulation app")
     simulation_app.close()
     print("Simulation app closed")
-

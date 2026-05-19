@@ -121,6 +121,7 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.demo_type = None
         self.random_start_idx = torch.zeros((self.num_envs,),device=self.sim.device,dtype=self.episode_length_buf.dtype) 
         self.avg_speed = 0
+        self.x_pos = 0
         self.test_slope_deg = self.cfg.test_slope_deg # Load from config
         self.ramp_demo = False
         if self.test_slope_deg != 0:
@@ -137,7 +138,7 @@ class HumanoidAmpEnv(DirectRLEnv):
         self._curriculum_fwd_max_speed = 1.2
         self._curriculum_max_fwd_max_speed = 2.4
         self._curriculum_step = 0.2
-        self._curriculum_threshold = 0.65
+        self._curriculum_threshold = 0.75
         self._curriculum_N = 60000
         self._curriculum_ep_buf = torch.zeros(self._curriculum_N, device=self.sim.device)
         self._curriculum_ep_write_idx = 0
@@ -153,68 +154,77 @@ class HumanoidAmpEnv(DirectRLEnv):
             self.test_fwd_speed = float(fwd_speed)
 
     def _setup_scene(self):
-        self.robot = Articulation(self.cfg.robot)
+            self.robot = Articulation(self.cfg.robot)
 
-        if self.cfg.demo_mode and self.cfg.demo_type == "noise" and self.cfg.noise_amplitude > 0.0:
-            from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg, HfWaveTerrainCfg
-            amp = self.cfg.noise_amplitude
-            self.cfg.terrain.terrain_generator.seed = self.cfg.noise_seed
-            # Select sub-terrain type based on noise_type
-            noise_type = getattr(self.cfg, "noise_type", "random")
-            if noise_type == "wave":
-                self.cfg.terrain.terrain_generator.sub_terrains = {
-                    "wave_terrain": HfWaveTerrainCfg(
-                        proportion=1.0,
-                        amplitude_range=(amp, amp),
-                        num_waves=4,
-                        border_width=0.25,
+            if self.cfg.demo_mode and self.cfg.demo_type == "noise" and self.cfg.noise_amplitude > 0.0:
+                from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg, HfWaveTerrainCfg
+                amp = self.cfg.noise_amplitude
+                self.cfg.terrain.terrain_generator.seed = self.cfg.noise_seed
+                # Select sub-terrain type based on noise_type
+                noise_type = getattr(self.cfg, "noise_type", "random")
+                if noise_type == "wave":
+                    self.cfg.terrain.terrain_generator.sub_terrains = {
+                        "wave_terrain": HfWaveTerrainCfg(
+                            proportion=1.0,
+                            amplitude_range=(amp, amp),
+                            num_waves=4,
+                            border_width=0.25,
+                        ),
+                    }
+                else:  # "random" (default)
+                    # downsampled_scale controls horizontal smoothness of the heightfield.
+                    # None uses the terrain default (horizontal_scale), and larger values
+                    # produce smoother random surfaces.
+                    d_scale = getattr(self.cfg, "downsampled_scale", None)
+                    # noise_step is still required by HfRandomUniformTerrainCfg and
+                    # controls vertical quantization; keep it fixed while sweeping
+                    # downsampled_scale for smoothness.
+                    n_step = getattr(self.cfg, "noise_step", 0.005)
+                    self.cfg.terrain.terrain_generator.sub_terrains = {
+                        "random_rough": HfRandomUniformTerrainCfg(
+                            proportion=1.0,
+                            noise_range=(-amp, amp),
+                            noise_step=n_step,
+                            downsampled_scale=d_scale,
+                            border_width=0.25,
+                        ),
+                    }
+                # Import the noisy terrain via TerrainImporter (same pattern as AnymalC)
+                self.cfg.terrain.num_envs = self.scene.cfg.num_envs
+                self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
+                self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+            else:
+                spawn_ground_plane(
+                    prim_path="/World/ground",
+                    cfg=GroundPlaneCfg(
+                        physics_material=sim_utils.RigidBodyMaterialCfg(
+                            static_friction=1.0,
+                            dynamic_friction=1.0,
+                            restitution=0.0,
+                        ),
                     ),
-                }
-            else:  # "random" (default)
-                self.cfg.terrain.terrain_generator.sub_terrains = {
-                    "random_rough": HfRandomUniformTerrainCfg(
-                        proportion=1.0,
-                        noise_range=(-amp, amp),
-                        noise_step=0.005,
-                        border_width=0.25,
-                    ),
-                }
-            # Import the noisy terrain via TerrainImporter (same pattern as AnymalC)
-            self.cfg.terrain.num_envs = self.scene.cfg.num_envs
-            self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
-            self._terrain = self.cfg.terrain.class_type(self.cfg.terrain)
-        else:
-            spawn_ground_plane(
-                prim_path="/World/ground",
-                cfg=GroundPlaneCfg(
-                    physics_material=sim_utils.RigidBodyMaterialCfg(
-                        static_friction=1.0,
-                        dynamic_friction=1.0,
-                        restitution=0.0,
-                    ),
-                ),
-            )
+                )
 
-            if self.cfg.demo_mode:
-                if self.cfg.demo_type == "ramp":
-                    slope = float(self.cfg.test_slope_deg)
-                    if slope != 0.0:
-                        stage = self.sim.stage
-                        prim = stage.GetPrimAtPath("/World/ground")
-                        if prim.IsValid():
-                            xform = UsdGeom.Xformable(prim)
-                            xform.ClearXformOpOrder()
-                            rot_op = xform.AddRotateXYZOp()
-                            # Rotate around Y axis for slope
-                            rot_op.Set(Gf.Vec3f(0.0, slope, 0.0))
+                if self.cfg.demo_mode:
+                    if self.cfg.demo_type == "ramp":
+                        slope = float(self.cfg.test_slope_deg)
+                        if slope != 0.0:
+                            stage = self.sim.stage
+                            prim = stage.GetPrimAtPath("/World/ground")
+                            if prim.IsValid():
+                                xform = UsdGeom.Xformable(prim)
+                                xform.ClearXformOpOrder()
+                                rot_op = xform.AddRotateXYZOp()
+                                # Rotate around Y axis for slope
+                                rot_op.Set(Gf.Vec3f(0.0, slope, 0.0))
 
-        self.scene.clone_environments(copy_from_source=False)
-        if self.device == "cpu":
-            self.scene.filter_collisions(global_prim_paths=["/World/ground"])
+            self.scene.clone_environments(copy_from_source=False)
+            if self.device == "cpu":
+                self.scene.filter_collisions(global_prim_paths=["/World/ground"])
 
-        self.scene.articulations["robot"] = self.robot
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-        light_cfg.func("/World/Light", light_cfg)
+            self.scene.articulations["robot"] = self.robot
+            light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
+            light_cfg.func("/World/Light", light_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone()
@@ -332,6 +342,7 @@ class HumanoidAmpEnv(DirectRLEnv):
             # --------------------------------------------------------
             if self.demo_mode:
                 x_pos = self.robot.data.body_pos_w[0, self.ref_body_index, 0].item()
+                self.x_pos = x_pos
                 step = int(self.episode_length_buf.item())
                 t = step * float(self.dt)
                 self.current_t = t
@@ -347,7 +358,7 @@ class HumanoidAmpEnv(DirectRLEnv):
             if self.cfg.early_termination:
                 # 1. Get Robot Root positions
                 # Assumes self.ref_body_index is the torso/root
-                root_y = self.robot.data.body_pos_w[:, self.ref_body_index, 0] 
+                root_x = self.robot.data.body_pos_w[:, self.ref_body_index, 0] 
                 root_z = self.robot.data.body_pos_w[:, self.ref_body_index, 2]
 
                 # 2. Calculate Slope Angle in Radians
@@ -357,7 +368,7 @@ class HumanoidAmpEnv(DirectRLEnv):
 
                 # 3. Calculate Floor Z at the current Y position
                 # Formula: z_floor = y * tan(theta)
-                floor_z = root_y * torch.tan(-slope_rad)
+                floor_z = root_x * torch.tan(-slope_rad)
                 # print(f"Floor Z: {floor_z}")
                 # 4. Calculate Relative Height
                 # This is the height of the robot ABOVE the calculated inclined floor
