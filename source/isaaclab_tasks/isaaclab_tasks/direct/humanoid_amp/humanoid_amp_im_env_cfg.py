@@ -72,7 +72,7 @@ class HumanoidAmpEnvCfg(DirectRLEnvCfg):
     
     # NEW: Added this field to control slope at spawn time
     demo_mode: bool= True
-    demo_type: str= "noise"   #Possible choices are vel, ramp, and noise
+    demo_type: str= "ramp"   #Possible choices are vel, ramp, and noise
     test_slope_deg: float = 0.0
 
     # Forward-speed curriculum: when enabled, the upper bound of the sampled

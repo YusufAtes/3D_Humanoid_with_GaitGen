@@ -191,6 +191,155 @@ def _make_figure(per_config, noise_type, d_scale, out_dir):
 
 
 # ---------------------------------------------------------------------------
+# success summary (avg across speeds, per noise configuration)
+# ---------------------------------------------------------------------------
+def _success_by_noise_config(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean success across the speed sweep, then across seeds, per noise cell."""
+    per_seed = pd.DataFrame(
+        df.groupby(["noise_type", "downsampled_scale", "noise_amplitude", "noise_seed"],
+                   dropna=False, as_index=False)
+          .agg(avg_success=("success", "mean"))
+    )
+    out = pd.DataFrame(
+        per_seed.groupby(["noise_type", "downsampled_scale", "noise_amplitude"],
+                         dropna=False, as_index=False)
+                .agg(avg_success=("avg_success", "mean"),
+                     success_std=("avg_success", "std"),
+                     n_seeds=("noise_seed", "count"))
+                .reset_index(drop=True)
+    )
+    sort_idx = np.lexsort(
+        (
+            out["noise_amplitude"].to_numpy(),
+            out["downsampled_scale"].fillna(np.inf).to_numpy(),
+            out["noise_type"].astype(str).to_numpy(),
+        )
+    )
+    out = out.iloc[sort_idx].reset_index(drop=True)
+    out["success_std"] = out["success_std"].fillna(0.0)
+    return out
+
+
+def _write_success_summary(per_config: list[dict], out_dir: Path) -> None:
+    """Print and save per-config average success for each noise configuration."""
+    rows: list[dict] = []
+    for entry in per_config:
+        succ = entry["success_by_noise"]
+        for _, r in succ.iterrows():
+            rows.append({
+                "config": entry["legend"],
+                "folder": entry["folder"],
+                "noise_type": r["noise_type"],
+                "downsampled_scale": r["downsampled_scale"],
+                "noise_amplitude_cm": r["noise_amplitude"] * 100.0,
+                "avg_success": r["avg_success"],
+                "success_std": r["success_std"],
+                "n_seeds": int(r["n_seeds"]),
+            })
+
+    if not rows:
+        return
+
+    table = pd.DataFrame(rows)
+    csv_path = out_dir / "noisy_plane_config_success.csv"
+    table.to_csv(csv_path, index=False, float_format="%.6f")
+
+    lines: list[str] = []
+    lines.append("Noisy plane — average success across all speeds")
+    lines.append("=" * 72)
+    lines.append("")
+    lines.append("Per noise configuration: mean success over the desired-speed")
+    lines.append("sweep within each seed, then mean ± std across seeds.")
+    lines.append("")
+
+    # per-config detail
+    for entry in per_config:
+        succ = entry["success_by_noise"]
+        lines.append("-" * 72)
+        lines.append(f"Config: {entry['legend']}")
+        lines.append("")
+        if succ.empty:
+            lines.append("  (no rows)")
+            lines.append("")
+            continue
+
+        header = f"  {'type':>6}  {'scale':>7}  {'amp(cm)':>8}  {'success':>8}  {'std':>8}  {'n':>3}"
+        lines.append(header)
+        lines.append("  " + "-" * (len(header) - 2))
+        for _, r in succ.iterrows():
+            scale_str = "  --" if pd.isna(r["downsampled_scale"]) else f"{r['downsampled_scale']:7.3f}"
+            lines.append(
+                f"  {r['noise_type']:>6}  {scale_str}  "
+                f"{r['noise_amplitude'] * 100:8.2f}  "
+                f"{r['avg_success']:8.3f}  {r['success_std']:8.3f}  "
+                f"{int(r['n_seeds']):3d}"
+            )
+        overall = succ["avg_success"].mean()
+        lines.append(f"  {'':>6}  {'':>7}  {'(overall)':>8}  {overall:8.3f}")
+        lines.append("")
+
+    # cross-config comparison per (type, scale)
+    lines.append("=" * 72)
+    lines.append("Cross-config comparison (avg success vs amplitude)")
+    lines.append("")
+
+    noise_keys = (
+        table[["noise_type", "downsampled_scale"]]
+        .drop_duplicates()
+        .sort_values(["noise_type", "downsampled_scale"], na_position="last")
+    )
+    for _, nk in noise_keys.iterrows():
+        ntype = nk["noise_type"]
+        d_scale = nk["downsampled_scale"]
+        if pd.isna(d_scale):
+            block = table[(table["noise_type"] == ntype) & table["downsampled_scale"].isna()]
+            block_title = f"{ntype} noise"
+        else:
+            block = table[
+                (table["noise_type"] == ntype)
+                & np.isclose(table["downsampled_scale"], d_scale)
+            ]
+            block_title = f"{ntype} noise  (downsampled_scale = {d_scale:g})"
+
+        if block.empty:
+            continue
+
+        lines.append(block_title)
+        lines.append("")
+
+        pivot = block.pivot_table(
+            index="noise_amplitude_cm",
+            columns="config",
+            values="avg_success",
+            aggfunc="first",
+        ).sort_index()
+        pivot.index.name = "amp(cm)"
+
+        # fixed-width text table
+        configs = list(pivot.columns)
+        col_w = max(10, max((len(c) for c in configs), default=10))
+        amp_w = 8
+        lines.append(f"  {'amp(cm)':>{amp_w}}" + "".join(f"{c:>{col_w}}" for c in configs))
+        lines.append("  " + "-" * (amp_w + col_w * len(configs)))
+        for amp, prow in pivot.iterrows():
+            line = f"  {amp:>{amp_w}.2f}"
+            for c in configs:
+                val = prow.get(c)
+                line += f"{val:>{col_w}.3f}" if pd.notna(val) else f"{'':>{col_w}}"
+            lines.append(line)
+        lines.append("")
+
+    text = "\n".join(lines)
+    txt_path = out_dir / "noisy_plane_success_summary.txt"
+    txt_path.write_text(text + "\n", encoding="utf-8")
+
+    print()
+    print(text)
+    print(f"Success summary saved to: {txt_path}")
+    print(f"Success table saved to: {csv_path}")
+
+
+# ---------------------------------------------------------------------------
 # summary writer
 # ---------------------------------------------------------------------------
 def _write_summary(per_config, summary_path: Path) -> None:
@@ -285,6 +434,7 @@ def main() -> None:
             "legend": _legend_from_folder(config_dir.name),
             "csv": csv_path,
             "agg": agg,
+            "success_by_noise": _success_by_noise_config(df),
             "n_rows": len(df),
         })
 
@@ -310,6 +460,7 @@ def main() -> None:
         _make_figure(per_config, "wave", float("nan"), out_dir)
 
     _write_summary(per_config, out_dir / "noisy_plane_summary.txt")
+    _write_success_summary(per_config, out_dir)
 
 
 if __name__ == "__main__":

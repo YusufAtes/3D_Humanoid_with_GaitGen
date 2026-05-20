@@ -7,7 +7,7 @@ REM =============================================================
 setlocal enabledelayedexpansion
 
 REM --- Configurable parameters (edit as needed) ----------------
-set CHECKPOINT=C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2\2026-04-27_20-16-13_amp_torch_no_curriculum_no_decay_noAMP_noImitation\checkpoints\best_agent.pt
+set CHECKPOINT=C:\Users\bates\IsaacLab\logs\skrl\humanoid_amp_im_walk_v2\2026-05-18_10-54-15_amp_torch_curriculum_no_decay\checkpoints\best_agent.pt
 set TASK=Isaac-Humanoid-AMP-Imp-Direct-v0
 set NUM_ENVS=1
 set ALGORITHM=AMP
